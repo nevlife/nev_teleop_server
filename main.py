@@ -87,7 +87,7 @@ async def run(cfg: dict):
     vehicle_proto.start(session)
 
     # 스테이션 브릿지
-    station_bridge = StationBridge(state, loop, vehicle_proto)
+    station_bridge = StationBridge(state, loop, vehicle_proto, cfg)
     station_bridge.start(session)
 
     app = create_app(state, vehicle_proto)

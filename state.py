@@ -72,7 +72,8 @@ class ControlState:
     mode:               int   = -1
     estop:              bool  = False
     linear_x:           float = 0.0
-    angular_z:          float = 0.0
+    steer_angle_deg:    float = 0.0   # 조향각 (deg) — nev_gcs 원본값
+    angular_z:          float = 0.0   # 각속도 (rad/s) — 서버 계산값
     raw_speed:          float = 0.0
     raw_steer:          float = 0.0
     joystick_connected: bool  = False  # 스테이션 조이스틱 연결 상태

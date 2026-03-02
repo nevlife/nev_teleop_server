@@ -15,3 +15,6 @@ state_push_interval:  0.5    # sec — 브라우저 UI 주기적 갱신
 
 # ── Station watchdog ─────────────────────────────────────
 station_timeout:      2.0    # sec — 스테이션 heartbeat 타임아웃
+
+# ── Vehicle kinematics ────────────────────────────────────
+wheelbase:            0.650  # m — Hunter V2 축간 거리 (teleop angular_z 계산에 사용)

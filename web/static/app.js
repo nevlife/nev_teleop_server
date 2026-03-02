@@ -202,10 +202,12 @@ class CommandCenter {
   // ── Twist ─────────────────────────────────────────
 
   _renderTwist(tv) {
+    const row = (lx, az) => `${sgn(lx)} m/s / ${sgn(az)} rad/s`;
+
     $('twist-body').innerHTML =
-      kv('nav',    `${sgn(tv.nav_lx)} / ${sgn(tv.nav_az)}`) +
-      kv('teleop', `${sgn(tv.teleop_lx)} / ${sgn(tv.teleop_az)}`) +
-      kv('final',  `${sgn(tv.final_lx)} / ${sgn(tv.final_az)}`);
+      kv('nav',    row(tv.nav_lx,    tv.nav_az)) +
+      kv('teleop', row(tv.teleop_lx, tv.teleop_az)) +
+      kv('final',  row(tv.final_lx,  tv.final_az));
   }
 
   // ── E-Stop ────────────────────────────────────────
@@ -227,17 +229,16 @@ class CommandCenter {
   // ── Joystick ──────────────────────────────────────
 
   _renderJoy(ctrl, stationConnected) {
-    const steerDeg = (ctrl.angular_z * 180 / Math.PI).toFixed(1);
-    const joyCls   = ctrl.joystick_connected ? 'green' : 'red';
-    const stasCls  = stationConnected ? 'green' : 'red';
+    const joyCls  = ctrl.joystick_connected ? 'green' : 'red';
+    const stasCls = stationConnected ? 'green' : 'red';
 
     $('joy-body').innerHTML =
-      kv('station', dot(stationConnected, stasCls) +
-                    (stationConnected ? 'CONNECTED' : 'OFFLINE'), stasCls) +
+      kv('station',  dot(stationConnected, stasCls) +
+                     (stationConnected ? 'CONNECTED' : 'OFFLINE'), stasCls) +
       kv('joystick', dot(ctrl.joystick_connected, joyCls) +
                      (ctrl.joystick_connected ? 'CONNECTED' : 'DISCONNECTED'), joyCls) +
-      kv('cmd',    `${ctrl.linear_x.toFixed(2)} m/s  ${steerDeg}°`) +
-      kv('raw',    `${ctrl.raw_speed.toFixed(2)} / ${ctrl.raw_steer.toFixed(2)}`);
+      kv('raw',      `${ctrl.raw_speed.toFixed(3)} / ${ctrl.raw_steer.toFixed(3)}`) +
+      kv('cmd',      `${ctrl.linear_x.toFixed(3)} m/s / ${ctrl.steer_angle_deg.toFixed(1)} deg / ${ctrl.angular_z.toFixed(4)} rad/s`);
   }
 
   // ── Resources ─────────────────────────────────────

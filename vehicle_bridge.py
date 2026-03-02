@@ -87,6 +87,7 @@ class VehicleProtocol:
         raw = bytes(sample.payload)
         self._tele_bytes += len(raw)
         self._call(self.state.update_packet, 'twist', json.loads(raw))
+        self._call_fn(self.state._broadcast_sync)
 
     def _on_network(self, sample):
         raw = bytes(sample.payload)
