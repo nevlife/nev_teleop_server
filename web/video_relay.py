@@ -18,7 +18,7 @@ class VideoRelay:
         self._loop:          asyncio.AbstractEventLoop | None = None
         self._executor:      concurrent.futures.ThreadPoolExecutor | None = None
         self._subscribers:   list[asyncio.Queue] = []
-        self._on_decode_ms:  callable | None = None
+        self._on_decode_ms:  callable | None = None # type: ignore
 
     def init(self, loop: asyncio.AbstractEventLoop, on_decode_ms=None) -> None:
         self._loop         = loop
@@ -46,7 +46,7 @@ class VideoRelay:
             return [], 0.0
         t0 = time.perf_counter()
         try:
-            frames = self._codec.decode(av.Packet(data))
+            frames = self._codec.decode(av.Packet(data)) # type: ignore
             result = []
             for frame in frames:
                 bgr = frame.to_ndarray(format='bgr24')
