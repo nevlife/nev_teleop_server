@@ -15,7 +15,7 @@ class TestSchemaDefaults:
     def test_server_defaults(self):
         c = ServerConfig()
         assert c.heartbeat_rate == 5.0
-        assert c.state_push_interval == 0.05
+        assert c.state_push_interval == 0.5
         assert c.station_timeout == 2.0
 
     def test_robot_default(self):

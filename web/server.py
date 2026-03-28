@@ -34,6 +34,10 @@ def create_app(state, proto, web_cfg=None, rtc_relay=None):
     async def index():
         return (STATIC_DIR / 'index.html').read_text()
 
+    @app.get('/health')
+    async def health():
+        return {'status': 'ok'}
+
     @app.get('/api/state')
     async def get_state():
         return json.loads(state.to_json())

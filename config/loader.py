@@ -31,7 +31,7 @@ def load_config(path: str, overrides: Dict[str, Any] = None) -> AppConfig:
 
     server_cfg = ServerConfig(
         heartbeat_rate=_cast(cfg_dict.get('heartbeat_rate', 5.0), float, 'heartbeat_rate'),
-        state_push_interval=_cast(cfg_dict.get('state_push_interval', 0.05), float, 'state_push_interval'),
+        state_push_interval=_cast(cfg_dict.get('state_push_interval', 0.5), float, 'state_push_interval'),
         station_timeout=_cast(cfg_dict.get('station_timeout', 2.0), float, 'station_timeout'),
     )
 
@@ -40,12 +40,12 @@ def load_config(path: str, overrides: Dict[str, Any] = None) -> AppConfig:
     )
 
     web_cfg = WebConfig(
+        host=str(cfg_dict.get('web_host', '0.0.0.0')),
         port=_cast(cfg_dict.get('web_port', 8080), int, 'web_port'),
         ws_state_queue_size=_cast(cfg_dict.get('ws_state_queue_size', 20), int, 'ws_state_queue_size'),
         ws_video_queue_size=_cast(cfg_dict.get('ws_video_queue_size', 5), int, 'ws_video_queue_size'),
         rtc_enabled=bool(cfg_dict.get('rtc_enabled', True)),
         rtc_stun_servers=cfg_dict.get('rtc_stun_servers', ['stun:stun.l.google.com:19302']),
-        video_transport=str(cfg_dict.get('video_transport', 'webrtc')),
     )
 
     raw_keys = cfg_dict.get('control_keys', ['mux', 'twist', 'network', 'hunter', 'estop'])

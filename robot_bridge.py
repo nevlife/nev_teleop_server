@@ -36,19 +36,32 @@ class RobotProtocol:
             self._pubs[key] = session.declare_publisher(key, **GCS_QOS[key])
 
         self._subs = [
-            session.declare_subscriber('nev/robot/mux',         self._on_mux),
-            session.declare_subscriber('nev/robot/twist',        self._on_twist),
-            session.declare_subscriber('nev/robot/network',      self._on_network),
-            session.declare_subscriber('nev/robot/hunter',       self._on_hunter),
-            session.declare_subscriber('nev/robot/estop',        self._on_estop),
-            session.declare_subscriber('nev/robot/cpu',          self._on_cpu),
-            session.declare_subscriber('nev/robot/mem',          self._on_mem),
-            session.declare_subscriber('nev/robot/gpu',          self._on_gpu),
-            session.declare_subscriber('nev/robot/disk',         self._on_disk),
-            session.declare_subscriber('nev/robot/net',          self._on_net),
-            session.declare_subscriber('nev/robot/camera',       self._on_camera),
-            session.declare_subscriber('nev/robot/hb_ack',       self._on_hb_ack),
-            session.declare_subscriber('nev/robot/video_stats',  self._on_video_stats),
+            session.declare_subscriber('nev/robot/mux',         self._on_mux,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/twist',        self._on_twist,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/network',      self._on_network,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/hunter',       self._on_hunter,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/estop',        self._on_estop,
+                                       reliability=zenoh.Reliability.RELIABLE),
+            session.declare_subscriber('nev/robot/cpu',          self._on_cpu,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/mem',          self._on_mem,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/gpu',          self._on_gpu,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/disk',         self._on_disk,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/net',          self._on_net,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/camera',       self._on_camera,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/hb_ack',       self._on_hb_ack,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/robot/video_stats',  self._on_video_stats,
+                                       reliability=zenoh.Reliability.BEST_EFFORT),
         ]
         logger.info('RobotProtocol started')
 
@@ -128,13 +141,16 @@ class RobotProtocol:
         gpus = json.loads(raw)
         def _update():
             for g in gpus:
-                self.state.update_gpu(g['idx'], {
-                    'gpu_usage':     g['gpu_usage'],
-                    'gpu_mem_used':  g['gpu_mem_used'],
-                    'gpu_mem_total': g['gpu_mem_total'],
-                    'gpu_temp':      g['gpu_temp'],
-                    'gpu_power':     g['gpu_power'],
-                })
+                try:
+                    self.state.update_gpu(g['idx'], {
+                        'gpu_usage':     g['gpu_usage'],
+                        'gpu_mem_used':  g['gpu_mem_used'],
+                        'gpu_mem_total': g['gpu_mem_total'],
+                        'gpu_temp':      g['gpu_temp'],
+                        'gpu_power':     g['gpu_power'],
+                    })
+                except (KeyError, TypeError):
+                    pass
         self._call(_update)
 
     def _on_disk(self, sample):
@@ -143,13 +159,16 @@ class RobotProtocol:
         data = json.loads(raw)
         def _update():
             for p in data.get('partitions', []):
-                self.state.update_disk_partition(p['idx'], {
-                    'mountpoint':  p['mountpoint'],
-                    'total_bytes': p['total_bytes'],
-                    'used_bytes':  p['used_bytes'],
-                    'percent':     p['percent'],
-                    'accessible':  p['accessible'],
-                })
+                try:
+                    self.state.update_disk_partition(p['idx'], {
+                        'mountpoint':  p['mountpoint'],
+                        'total_bytes': p['total_bytes'],
+                        'used_bytes':  p['used_bytes'],
+                        'percent':     p['percent'],
+                        'accessible':  p['accessible'],
+                    })
+                except (KeyError, TypeError):
+                    pass
         self._call(_update)
 
     def _on_camera(self, sample):
@@ -196,19 +215,25 @@ class RobotProtocol:
         self._tele_bytes += len(raw)
         data = json.loads(raw)
         def _update():
-            self.state.update_packet('resources', {
-                'net_total_ifaces':  data['net_total_ifaces'],
-                'net_active_ifaces': data['net_active_ifaces'],
-                'net_down_ifaces':   data['net_down_ifaces'],
-            })
-            for iface in data.get('interfaces', []):
-                self.state.update_net_interface(iface['idx'], {
-                    'name':       iface['name'],
-                    'is_up':      iface['is_up'],
-                    'speed_mbps': iface['speed_mbps'],
-                    'in_bps':     iface['in_bps'],
-                    'out_bps':    iface['out_bps'],
+            try:
+                self.state.update_packet('resources', {
+                    'net_total_ifaces':  data['net_total_ifaces'],
+                    'net_active_ifaces': data['net_active_ifaces'],
+                    'net_down_ifaces':   data['net_down_ifaces'],
                 })
+            except (KeyError, TypeError):
+                pass
+            for iface in data.get('interfaces', []):
+                try:
+                    self.state.update_net_interface(iface['idx'], {
+                        'name':       iface['name'],
+                        'is_up':      iface['is_up'],
+                        'speed_mbps': iface['speed_mbps'],
+                        'in_bps':     iface['in_bps'],
+                        'out_bps':    iface['out_bps'],
+                    })
+                except (KeyError, TypeError):
+                    pass
         self._call(_update)
 
     def calc_bandwidth(self):

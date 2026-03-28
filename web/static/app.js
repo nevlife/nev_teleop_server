@@ -1,6 +1,7 @@
 'use strict';
 
 const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 const MODE_NAMES   = { '-1': 'IDLE', '0': 'CTRL', '1': 'NAV', '2': 'REMOTE' };
 const SRC_NAMES    = { '-1': 'NONE', '0': 'NAV',  '1': 'TELEOP' };
@@ -18,7 +19,7 @@ const fmtRate = b => {
 
 function kv(key, val, cls = '') {
   return `<div class="kv">
-    <span class="k">${key}</span>
+    <span class="k">${esc(key)}</span>
     <span class="v${cls ? ' ' + cls : ''}">${val}</span>
   </div>`;
 }
@@ -210,9 +211,7 @@ class CommandCenter {
         this._rtcChannel = event.channel;
         this._rtcChannel.binaryType = 'arraybuffer';
         this._rtcChannel.onmessage = (e) => {
-          const data = new Uint8Array(e.data);
-          // Strip 4-byte timestamp header
-          const nal = data.slice(4);
+          const nal = new Uint8Array(e.data);
           this._feedNal(nal);
         };
         this._rtcChannel.onclose = () => {
@@ -463,7 +462,6 @@ class CommandCenter {
                      (stationConnected ? 'CONNECTED' : 'OFFLINE'), stasCls) +
       kv('joystick', dot(ctrl.joystick_connected, joyCls) +
                      (ctrl.joystick_connected ? 'CONNECTED' : 'DISCONNECTED'), joyCls) +
-      kv('raw',      `${ctrl.raw_speed.toFixed(3)} / ${ctrl.raw_steer.toFixed(3)}`) +
       kv('cmd',      `${ctrl.linear_x.toFixed(3)} m/s / ${ctrl.steer_angle_deg.toFixed(1)} deg / ${ctrl.angular_z.toFixed(4)} rad/s`);
   }
 
@@ -554,7 +552,7 @@ class CommandCenter {
       return;
     }
     $('alerts-body').innerHTML = alerts
-      .map(a => `<div class="alert-item alert-${a.level}">&#9650; ${a.message}</div>`)
+      .map(a => `<div class="alert-item alert-${esc(a.level)}">&#9650; ${esc(a.message)}</div>`)
       .join('');
   }
 

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 import dataclasses
@@ -124,6 +125,8 @@ class SharedState:
             self.last_control_recv = now
 
     def _upsert_list(self, lst: list, idx: int, data: dict):
+        if idx > 64:
+            return
         if idx >= len(lst):
             lst.extend({} for _ in range(idx - len(lst) + 1))
         lst[idx].update(data)

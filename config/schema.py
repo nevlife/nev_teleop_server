@@ -10,7 +10,7 @@ class ZenohConfig:
 @dataclass
 class ServerConfig:
     heartbeat_rate: float = 5.0
-    state_push_interval: float = 0.05
+    state_push_interval: float = 0.5
     station_timeout: float = 2.0
 
 
@@ -21,12 +21,12 @@ class RobotConfig:
 
 @dataclass
 class WebConfig:
+    host: str = '0.0.0.0'
     port: int = 8080
     ws_state_queue_size: int = 20
     ws_video_queue_size: int = 5
     rtc_enabled: bool = True
     rtc_stun_servers: List[str] = field(default_factory=lambda: ['stun:stun.l.google.com:19302'])
-    video_transport: str = 'webrtc'
 
 
 @dataclass
@@ -71,9 +71,6 @@ class AppConfig:
 
         if self.web.ws_video_queue_size <= 0:
             raise ValueError(f"ws_video_queue_size must be positive, got {self.web.ws_video_queue_size}")
-
-        if self.web.video_transport not in ('webrtc', 'websocket'):
-            raise ValueError(f"video_transport must be 'webrtc' or 'websocket', got {self.web.video_transport!r}")
 
         if self.telemetry.disconnect_timeout <= 0:
             raise ValueError(f"disconnect_timeout must be positive, got {self.telemetry.disconnect_timeout}")

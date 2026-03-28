@@ -31,8 +31,6 @@ seq_max:              65536
 # Camera packet header size: double(8B) + uint16(2B)
 camera_header_bytes:  10
 
-# Video transport: 'webrtc' (DataChannel, UDP) or 'websocket' (fallback)
-video_transport:      webrtc
 # WebRTC settings
 rtc_enabled:          true
 rtc_stun_servers:

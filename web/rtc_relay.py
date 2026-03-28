@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import struct
-import time
 from typing import Dict, List, Optional
 
 from aiortc import RTCPeerConnection, RTCConfiguration, RTCIceServer, RTCSessionDescription, RTCIceCandidate
@@ -81,8 +79,6 @@ class RTCRelay:
     def broadcast_nal(self, nal: bytes) -> None:
         if not nal or not self._channels:
             return
-        ts_header = struct.pack('!I', int(time.time() * 1000) & 0xFFFFFFFF)
-        payload = ts_header + nal
 
         dead = []
         for peer_id, channel in list(self._channels.items()):
@@ -91,7 +87,7 @@ class RTCRelay:
                     continue
                 if hasattr(channel, 'bufferedAmount') and channel.bufferedAmount > BACKPRESSURE_LIMIT:
                     continue
-                channel.send(payload)
+                channel.send(nal)
             except Exception as e:
                 logger.debug(f'DataChannel send error for peer {peer_id}: {e}')
                 dead.append(peer_id)

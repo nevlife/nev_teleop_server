@@ -62,7 +62,10 @@ async def run_send_loop(state: SharedState, proto: RobotProtocol, cfg):
             state._broadcast_sync()
             last_push = now
 
-        await asyncio.sleep(0.01)
+        next_hb   = last_hb   + hb_interval   - now
+        next_push = last_push + push_interval  - now
+        sleep_for = max(0.001, min(next_hb, next_push))
+        await asyncio.sleep(sleep_for)
 
 
 async def run(cfg):
@@ -94,13 +97,13 @@ async def run(cfg):
     app = create_app(state, robot_proto, cfg.web, rtc_relay=rtc_relay)
     uv_cfg = uvicorn.Config(
         app,
-        host='0.0.0.0',
+        host=cfg.web.host,
         port=cfg.web.port,
         log_level='warning',
         loop='none',
     )
     server = uvicorn.Server(uv_cfg)
-    logger.info(f'Web  http://0.0.0.0:{cfg.web.port}')
+    logger.info(f'Web  http://{cfg.web.host}:{cfg.web.port}')
 
     try:
         await asyncio.gather(
