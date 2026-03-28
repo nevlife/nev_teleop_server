@@ -4,13 +4,12 @@ import dataclasses
 from dataclasses import dataclass
 from typing import List
 
-# Key control data used to determine vehicle connectivity
-_CONTROL_KEYS = frozenset({'mux', 'twist', 'network', 'hunter', 'estop'})
+from config.schema import TelemetryConfig
 
 @dataclass
 class MuxStatus:
-    requested_mode: int = -1      # -1: idle 0: ctrl 1: nav 2: remote
-    active_source:  int = -1      # 0: nav 1: teleop -1: none
+    requested_mode: int = -1
+    active_source:  int = -1
     remote_enabled: bool = False
     nav_active:     bool = False
     teleop_active:  bool = False
@@ -30,22 +29,22 @@ class TwistValues:
 @dataclass
 class NetworkStatus:
     connected:           bool  = False
-    status_code:         int   = 2     # 0: ok 1: hb_delay 2: socket_err
+    status_code:         int   = 2
     ht_rtt:              float = 0.0
     bw_video_rx:         float = 0.0
     bw_telemetry:        float = 0.0
-    bw_video_tx:         float = 0.0   # Vehicle video TX (Mbps)
-    encode_delay:        float = 0.0   # GStreamer encode latency (ms)
-    video_net_delay:     float = 0.0   # Video one-way network latency (ms)
-    decode_delay:        float = 0.0   # Server H.265→JPEG processing latency (ms)
-    tele_delay_ms:       float = 0.0   # Telemetry one-way latency (ms)
+    bw_video_tx:         float = 0.0
+    encode_delay:        float = 0.0
+    video_net_delay:     float = 0.0
+    browser_decode_ms:   float = 0.0
+    tele_delay_ms:       float = 0.0
 
 
 @dataclass
 class HunterStatus:
     linear_vel:      float = 0.0
     steering_angle:  float = 0.0
-    vehicle_state:   int   = 0
+    robot_state:     int   = 0
     control_mode:    int   = 0
     error_code:      int   = 0
     battery_voltage: float = 0.0
@@ -54,8 +53,8 @@ class HunterStatus:
 @dataclass
 class EStopStatus:
     is_estop:    bool = False
-    bridge_flag: int  = 0   # 0: ok 1: server_cmd 2: socket 3: hb_timeout 4: ctrl_timeout
-    mux_flag:    int  = 0   # 0: ok 1: remote+nav+no_teleop
+    bridge_flag: int  = 0
+    mux_flag:    int  = 0
 
 
 @dataclass
@@ -75,9 +74,9 @@ class ControlState:
     mode:               int   = -1
     estop:              bool  = False
     linear_x:           float = 0.0
-    steer_angle_deg:    float = 0.0   # Steering angle (deg) — from nev_gcs
-    angular_z:          float = 0.0   # Angular velocity (rad/s) — computed by server
-    joystick_connected: bool  = False  # Station joystick connection state
+    steer_angle_deg:    float = 0.0
+    angular_z:          float = 0.0
+    joystick_connected: bool  = False
 
 
 @dataclass
@@ -87,7 +86,9 @@ class Alert:
 
 
 class SharedState:
-    def __init__(self):
+    def __init__(self, telemetry_cfg: TelemetryConfig = None):
+        self._control_keys = (telemetry_cfg or TelemetryConfig()).control_keys_set
+
         self.mux       = MuxStatus()
         self.twist     = TwistValues()
         self.network   = NetworkStatus()
@@ -98,10 +99,9 @@ class SharedState:
         self.control   = ControlState()
         self.alerts: List[Alert] = []
 
-        self.last_vehicle_recv: float = 0.0   # All vehicle data (connectivity monitoring)
-        self.last_control_recv: float = 0.0   # Control data only (mux/twist/hunter/estop)
+        self.last_robot_recv: float = 0.0
+        self.last_control_recv: float = 0.0
 
-        # Station connection state
         self.station_connected: bool  = False
         self.station_last_recv: float = 0.0
 
@@ -119,8 +119,8 @@ class SharedState:
             if hasattr(obj, k):
                 setattr(obj, k, v)
         now = time.monotonic()
-        self.last_vehicle_recv = now
-        if key in _CONTROL_KEYS:
+        self.last_robot_recv = now
+        if key in self._control_keys:
             self.last_control_recv = now
 
     def _upsert_list(self, lst: list, idx: int, data: dict):
@@ -130,15 +130,15 @@ class SharedState:
 
     def update_gpu(self, idx: int, data: dict):
         self._upsert_list(self.gpu_list, idx, data)
-        self.last_vehicle_recv = time.monotonic()
+        self.last_robot_recv = time.monotonic()
 
     def update_disk_partition(self, idx: int, data: dict):
         self._upsert_list(self.disk_partitions, idx, data)
-        self.last_vehicle_recv = time.monotonic()
+        self.last_robot_recv = time.monotonic()
 
     def update_net_interface(self, idx: int, data: dict):
         self._upsert_list(self.net_interfaces, idx, data)
-        self.last_vehicle_recv = time.monotonic()
+        self.last_robot_recv = time.monotonic()
 
     def update_remote_enabled(self, val: bool):
         self.remote_enabled = val
@@ -157,10 +157,10 @@ class SharedState:
         if self.estop.is_estop and (
             abs(self.twist.final_lx) > 0.05 or abs(self.twist.final_az) > 0.05
         ):
-            alerts.append(Alert('error', 'E-STOP active but vehicle is moving!'))
+            alerts.append(Alert('error', 'E-STOP active but robot is moving!'))
 
         if self.control.estop and not self.estop.is_estop:
-            alerts.append(Alert('warn', 'E-stop sent — waiting for vehicle confirmation'))
+            alerts.append(Alert('warn', 'E-stop sent — waiting for robot confirmation'))
 
         if (self.mux.requested_mode == 2
                 and self.mux.remote_enabled
@@ -170,7 +170,7 @@ class SharedState:
         if self.last_control_recv > 0:
             age = time.monotonic() - self.last_control_recv
             if age > 3.0:
-                alerts.append(Alert('error', f'No vehicle data for {age:.1f}s'))
+                alerts.append(Alert('error', f'No robot data for {age:.1f}s'))
 
         if not self.station_connected:
             alerts.append(Alert('warn', 'Station not connected — control unavailable'))
@@ -181,11 +181,20 @@ class SharedState:
         if not self._subscribers:
             return
         data = self.to_json()
+        dead = []
         for q in self._subscribers[:]:
             try:
                 q.put_nowait(data)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(data)
+                except Exception:
+                    dead.append(q)
             except Exception:
-                pass
+                dead.append(q)
+        for q in dead:
+            self.remove_subscriber(q)
 
     def add_subscriber(self, q):
         self._subscribers.append(q)
@@ -215,6 +224,6 @@ class SharedState:
             'station_connected': self.station_connected,
             'alerts':            [_d(a) for a in self.alerts],
             'server_time':       time.time(),
-            'vehicle_age':       (time.monotonic() - self.last_control_recv)
+            'robot_age':         (time.monotonic() - self.last_control_recv)
                                  if self.last_control_recv > 0 else -1,
         })

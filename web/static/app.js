@@ -39,19 +39,37 @@ function textCls(val, warnAt, errorAt) {
   return '';
 }
 
+/* ── H.265 NAL keyframe detection ── */
+function isH265Keyframe(nal) {
+  let offset = 0;
+  if (nal.length >= 4 && nal[0] === 0 && nal[1] === 0) {
+    offset = (nal[2] === 1) ? 3 : 4;
+  }
+  if (offset >= nal.length) return false;
+  const nalType = (nal[offset] >> 1) & 0x3F;
+  return nalType >= 16 && nalType <= 21; // BLA, IDR, CRA
+}
+
 class CommandCenter {
   constructor() {
     this.ws    = null;
     this.state = null;
     this._reconnectTimer  = null;
+    this._videoDecoder    = null;
+    this._rtcPc           = null;
+    this._rtcChannel      = null;
     this._videoWs         = null;
     this._videoRetryTimer = null;
+    this._decodeTimestamps = new Map();
+    this._lastDecodeMs    = 0;
+    this._metricsInterval = null;
+    this._frameCounter    = 0;
     this._bindUI();
     this._startClock();
     this._connect();
-    this._startVideo();
   }
 
+  /* ── Telemetry WebSocket (bidirectional) ── */
   _connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     this.ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -59,18 +77,245 @@ class CommandCenter {
     this.ws.onopen = () => {
       $('badge-ws').className = 'badge ok';
       clearTimeout(this._reconnectTimer);
+      this._startVideo();
+      this._startMetricsReport();
     };
     this.ws.onmessage = e => {
-      try { this.state = JSON.parse(e.data); this._render(this.state); }
-      catch (err) { console.error(err); }
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'rtc_offer') {
+          this._handleRtcOffer(msg);
+        } else {
+          this.state = msg;
+          this._render(this.state);
+        }
+      } catch (err) { console.error(err); }
     };
     this.ws.onclose = () => {
       $('badge-ws').className = 'badge error';
+      this._stopVideo();
+      this._stopMetricsReport();
       this._reconnectTimer = setTimeout(() => this._connect(), 2000);
     };
     this.ws.onerror = () => this.ws.close();
   }
 
+  _wsSend(obj) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(obj));
+    }
+  }
+
+  /* ── Video: WebRTC DataChannel (primary) or WebSocket (fallback) ── */
+  _startVideo() {
+    if (!('VideoDecoder' in window)) {
+      console.warn('WebCodecs not supported, falling back to WebSocket video');
+      this._startVideoWsFallback();
+      return;
+    }
+    this._initDecoder();
+    // Request WebRTC offer from server via telemetry WS
+    this._wsSend({ type: 'rtc_request' });
+  }
+
+  _stopVideo() {
+    clearTimeout(this._videoRetryTimer);
+    if (this._rtcPc) {
+      this._rtcPc.close();
+      this._rtcPc = null;
+      this._rtcChannel = null;
+    }
+    if (this._videoWs) {
+      this._videoWs.onclose = null;
+      this._videoWs.close();
+      this._videoWs = null;
+    }
+    if (this._videoDecoder && this._videoDecoder.state !== 'closed') {
+      this._videoDecoder.close();
+      this._videoDecoder = null;
+    }
+    $('video-canvas').style.display = 'none';
+    $('video-placeholder').style.display = '';
+    $('video-status').textContent = 'NO SIGNAL';
+  }
+
+  _initDecoder() {
+    if (this._videoDecoder && this._videoDecoder.state !== 'closed') {
+      this._videoDecoder.close();
+    }
+    const canvas = $('video-canvas');
+    const ctx = canvas.getContext('2d');
+
+    this._videoDecoder = new VideoDecoder({
+      output: (frame) => {
+        canvas.width = frame.displayWidth;
+        canvas.height = frame.displayHeight;
+        ctx.drawImage(frame, 0, 0);
+        frame.close();
+
+        canvas.style.display = 'block';
+        $('video-placeholder').style.display = 'none';
+        $('video-status').textContent = 'LIVE';
+
+        // Measure decode time
+        const id = frame.timestamp;
+        const t0 = this._decodeTimestamps.get(id);
+        if (t0 !== undefined) {
+          this._lastDecodeMs = performance.now() - t0;
+          this._decodeTimestamps.delete(id);
+        }
+      },
+      error: (e) => console.error('VideoDecoder error:', e)
+    });
+
+    this._videoDecoder.configure({
+      codec: 'hev1.1.6.L93.B0',
+    });
+  }
+
+  _feedNal(nal) {
+    if (!this._videoDecoder || this._videoDecoder.state === 'closed') return;
+    const isKey = isH265Keyframe(nal);
+    const timestamp = this._frameCounter++;
+    this._decodeTimestamps.set(timestamp, performance.now());
+
+    // Limit pending timestamps to prevent memory leak
+    if (this._decodeTimestamps.size > 120) {
+      const oldest = this._decodeTimestamps.keys().next().value;
+      this._decodeTimestamps.delete(oldest);
+    }
+
+    try {
+      const chunk = new EncodedVideoChunk({
+        type: isKey ? 'key' : 'delta',
+        timestamp: timestamp,
+        data: nal,
+      });
+      this._videoDecoder.decode(chunk);
+    } catch (e) {
+      console.warn('decode error:', e);
+    }
+  }
+
+  /* ── WebRTC signaling ── */
+  async _handleRtcOffer(msg) {
+    try {
+      if (this._rtcPc) this._rtcPc.close();
+
+      this._rtcPc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      this._rtcPc.ondatachannel = (event) => {
+        this._rtcChannel = event.channel;
+        this._rtcChannel.binaryType = 'arraybuffer';
+        this._rtcChannel.onmessage = (e) => {
+          const data = new Uint8Array(e.data);
+          // Strip 4-byte timestamp header
+          const nal = data.slice(4);
+          this._feedNal(nal);
+        };
+        this._rtcChannel.onclose = () => {
+          $('video-canvas').style.display = 'none';
+          $('video-placeholder').style.display = '';
+          $('video-status').textContent = 'NO SIGNAL';
+        };
+      };
+
+      this._rtcPc.onicecandidate = (event) => {
+        if (event.candidate) {
+          this._wsSend({
+            type: 'rtc_ice',
+            candidate: {
+              candidate: event.candidate.candidate,
+              sdpMid: event.candidate.sdpMid,
+              sdpMLineIndex: event.candidate.sdpMLineIndex,
+            }
+          });
+        }
+      };
+
+      this._rtcPc.onconnectionstatechange = () => {
+        if (this._rtcPc.connectionState === 'failed') {
+          console.warn('WebRTC failed, falling back to WebSocket video');
+          this._startVideoWsFallback();
+        }
+      };
+
+      await this._rtcPc.setRemoteDescription(
+        new RTCSessionDescription({ sdp: msg.sdp, type: msg.sdp_type })
+      );
+      const answer = await this._rtcPc.createAnswer();
+      await this._rtcPc.setLocalDescription(answer);
+
+      this._wsSend({
+        type: 'rtc_answer',
+        sdp: answer.sdp,
+        sdp_type: answer.type,
+      });
+    } catch (e) {
+      console.error('WebRTC setup failed:', e);
+      this._startVideoWsFallback();
+    }
+  }
+
+  /* ── WebSocket video fallback (raw NAL, WebCodecs decode) ── */
+  _startVideoWsFallback() {
+    clearTimeout(this._videoRetryTimer);
+
+    if (this._videoWs) {
+      this._videoWs.onclose = null;
+      this._videoWs.close();
+      this._videoWs = null;
+    }
+
+    if (!this._videoDecoder || this._videoDecoder.state === 'closed') {
+      if ('VideoDecoder' in window) {
+        this._initDecoder();
+      } else {
+        $('video-status').textContent = 'UNSUPPORTED';
+        return;
+      }
+    }
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${location.host}/ws/video`);
+    this._videoWs = ws;
+    ws.binaryType = 'arraybuffer';
+
+    ws.onmessage = (e) => {
+      const nal = new Uint8Array(e.data);
+      this._feedNal(nal);
+    };
+
+    ws.onclose = () => {
+      $('video-canvas').style.display = 'none';
+      $('video-placeholder').style.display = '';
+      $('video-status').textContent = 'NO SIGNAL';
+      this._videoRetryTimer = setTimeout(() => this._startVideoWsFallback(), 3000);
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  /* ── Decode metrics reporting ── */
+  _startMetricsReport() {
+    this._stopMetricsReport();
+    this._metricsInterval = setInterval(() => {
+      if (this._lastDecodeMs > 0) {
+        this._wsSend({ type: 'video_metrics', decode_ms: this._lastDecodeMs });
+      }
+    }, 1000);
+  }
+
+  _stopMetricsReport() {
+    if (this._metricsInterval) {
+      clearInterval(this._metricsInterval);
+      this._metricsInterval = null;
+    }
+  }
+
+  /* ── UI ── */
   _bindUI() {
     document.querySelectorAll('.mode-btn').forEach(btn =>
       btn.addEventListener('click', () =>
@@ -110,9 +355,9 @@ class CommandCenter {
 
   _renderHeader(s) {
     const veh = $('badge-veh');
-    if      (s.vehicle_age < 0) { veh.textContent = 'VEH';                              veh.className = 'badge'; }
-    else if (s.vehicle_age < 2) { veh.textContent = 'VEH';                              veh.className = 'badge ok'; }
-    else                        { veh.textContent = `VEH ${s.vehicle_age.toFixed(0)}s`; veh.className = 'badge error'; }
+    if      (s.robot_age < 0) { veh.textContent = 'VEH';                              veh.className = 'badge'; }
+    else if (s.robot_age < 2) { veh.textContent = 'VEH';                              veh.className = 'badge ok'; }
+    else                        { veh.textContent = `VEH ${s.robot_age.toFixed(0)}s`; veh.className = 'badge error'; }
 
     const stas = $('badge-stas');
     stas.textContent = 'STAS';
@@ -145,7 +390,7 @@ class CommandCenter {
     $('hunter-body').innerHTML =
       kv('vel',   `${sgn(hs.linear_vel)} m/s`) +
       kv('steer', `${steerDeg} °`) +
-      kv('state', hs.vehicle_state) +
+      kv('state', hs.robot_state) +
       kv('ctrl',  hs.control_mode) +
       kv('err',   hs.error_code === 0 ? 'NONE' : `0x${hs.error_code.toString(16).toUpperCase()}`, errCls) +
       kv('bat',   `${hs.battery_voltage.toFixed(2)} V`, batCls);
@@ -167,7 +412,8 @@ class CommandCenter {
     const stCls  = ns.connected ? 'green' : 'red';
     const rttCls = textCls(ns.ht_rtt, 50, 100);
 
-    const estTotal = (ns.encode_delay ?? 0) + (ns.video_net_delay ?? 0) + (ns.decode_delay ?? 0);
+    const decMs = ns.browser_decode_ms ?? 0;
+    const estTotal = (ns.encode_delay ?? 0) + (ns.video_net_delay ?? 0) + decMs;
 
     $('network-body').innerHTML =
       kv('status',    dot(ns.connected, ns.connected ? 'green' : 'red') +
@@ -178,7 +424,7 @@ class CommandCenter {
       '<div class="kv"><span class="k">─────</span><span class="v"></span></div>' +
       kv('enc delay',   ns.encode_delay    > 0 ? `${ns.encode_delay.toFixed(1)} ms`    : '—') +
       kv('net delay',   ns.video_net_delay > 0 ? `${ns.video_net_delay.toFixed(1)} ms` : '—') +
-      kv('dec delay',   ns.decode_delay    > 0 ? `${ns.decode_delay.toFixed(1)} ms`    : '—') +
+      kv('dec delay',   decMs              > 0 ? `${decMs.toFixed(1)} ms`              : '—') +
       kv('total delay', estTotal           > 0 ? `${estTotal.toFixed(1)} ms`            : '—') +
       '<div class="kv"><span class="k">─────</span><span class="v"></span></div>' +
       kv('tele delay', ns.tele_delay_ms > 0 ? `${ns.tele_delay_ms.toFixed(1)} ms` : '—') +
@@ -310,43 +556,6 @@ class CommandCenter {
     $('alerts-body').innerHTML = alerts
       .map(a => `<div class="alert-item alert-${a.level}">&#9650; ${a.message}</div>`)
       .join('');
-  }
-
-  _startVideo() {
-    clearTimeout(this._videoRetryTimer);
-
-    if (this._videoWs) {
-      this._videoWs.onclose = null;
-      this._videoWs.close();
-      this._videoWs = null;
-    }
-
-    const imgEl    = $('video-el');
-    const statusEl = $('video-status');
-
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws    = new WebSocket(`${proto}//${location.host}/ws/video`);
-    this._videoWs = ws;
-
-    ws.binaryType = 'blob';
-
-    ws.onmessage = (e) => {
-      const url = URL.createObjectURL(e.data);
-      imgEl.onload = () => URL.revokeObjectURL(url);
-      imgEl.src = url;
-      imgEl.style.display = 'block';
-      $('video-placeholder').style.display = 'none';
-      statusEl.textContent = 'LIVE';
-    };
-
-    ws.onclose = () => {
-      imgEl.style.display = 'none';
-      $('video-placeholder').style.display = '';
-      statusEl.textContent = 'NO SIGNAL';
-      this._videoRetryTimer = setTimeout(() => this._startVideo(), 3000);
-    };
-
-    ws.onerror = () => ws.close();
   }
 
   _startClock() {

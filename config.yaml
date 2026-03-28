@@ -1,13 +1,39 @@
-# Zenoh router endpoint for vehicle and station connections
-# Local test: tcp/127.0.0.1:7447
-# Production: tcp/0.0.0.0:7447  (zenohd listens on this port)
+# Zenoh router endpoint
 zenoh_locator: "tcp/127.0.0.1:7447"
 
+# Web dashboard port
 web_port: 8080
 
-heartbeat_rate:       5.0    # Hz  : server → vehicle heartbeat
-state_push_interval:  0.5    # sec : browser UI polling interval (separate from immediate push on twist/teleop receive)
+# Heartbeat frequency (Hz)
+heartbeat_rate:       5.0
+# State broadcast interval (sec)
+state_push_interval:  0.5
+# Station heartbeat timeout (sec)
+station_timeout:      2.0
 
-station_timeout:      2.0    # sec : station heartbeat timeout
+# Robot wheelbase for Ackermann steering (m)
+wheelbase:            0.650
 
-wheelbase:            0.650  # m   : wheelbase (used for teleop angular_z calculation)
+# Keys that update last_control_recv timestamp
+control_keys:
+  - mux
+  - twist
+  - network
+  - hunter
+  - estop
+
+# Robot disconnect threshold (sec)
+disconnect_timeout:   3.0
+# Bandwidth calculation cycle (sec)
+bw_calc_interval:     1.0
+# Sequence number wrap limit (uint16)
+seq_max:              65536
+# Camera packet header size: double(8B) + uint16(2B)
+camera_header_bytes:  10
+
+# Video transport: 'webrtc' (DataChannel, UDP) or 'websocket' (fallback)
+video_transport:      webrtc
+# WebRTC settings
+rtc_enabled:          true
+rtc_stun_servers:
+  - "stun:stun.l.google.com:19302"

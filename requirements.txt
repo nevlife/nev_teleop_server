@@ -1,7 +1,5 @@
-zenoh
+eclipse-zenoh
 fastapi
 uvicorn[standard]
 pyyaml
-opencv-python
-numpy
-av
+aiortc

@@ -6,29 +6,23 @@ import time
 
 import zenoh
 
-_GCS_QOS = {
-    'nev/gcs/heartbeat': dict(reliability=zenoh.Reliability.BEST_EFFORT,  congestion_control=zenoh.CongestionControl.DROP,  priority=zenoh.Priority.DATA_LOW),
-    'nev/gcs/teleop':    dict(reliability=zenoh.Reliability.BEST_EFFORT,  congestion_control=zenoh.CongestionControl.DROP,  priority=zenoh.Priority.INTERACTIVE_HIGH),
-    'nev/gcs/estop':     dict(reliability=zenoh.Reliability.RELIABLE,     congestion_control=zenoh.CongestionControl.BLOCK, priority=zenoh.Priority.REAL_TIME),
-    'nev/gcs/cmd_mode':  dict(reliability=zenoh.Reliability.RELIABLE,     congestion_control=zenoh.CongestionControl.BLOCK, priority=zenoh.Priority.INTERACTIVE_HIGH),
-}
-
+from zenoh_utils.protocol import GCS_QOS
+from config.schema import TelemetryConfig
+from telemetry.parser import extract_timestamp_delay
 from state import SharedState
 from web.video_relay import video_relay
-
-_CAMERA_HEADER_BYTES = 10    # struct layout: double(ts 8B) + uint16(encode_ms 2B)
-_DISCONNECT_TIMEOUT  = 3.0   # sec — vehicle disconnect threshold
-_BW_CALC_INTERVAL    = 1.0   # sec — bandwidth calculation interval
-_SEQ_MAX             = 65536 # sequence number max (uint16)
 
 logger = logging.getLogger(__name__)
 
 
-class VehicleProtocol:
+class RobotProtocol:
 
-    def __init__(self, state: SharedState, loop: asyncio.AbstractEventLoop):
+    def __init__(self, state: SharedState, loop: asyncio.AbstractEventLoop,
+                 telemetry_cfg: TelemetryConfig = None, rtc_relay=None):
         self.state   = state
         self._loop   = loop
+        self._cfg    = telemetry_cfg or TelemetryConfig()
+        self._rtc_relay = rtc_relay
         self._pubs:  dict = {}
         self._subs:  list = []
         self._seq    = 0
@@ -39,24 +33,24 @@ class VehicleProtocol:
     def start(self, session: zenoh.Session) -> None:
         for key in ('nev/gcs/heartbeat', 'nev/gcs/teleop',
                     'nev/gcs/estop', 'nev/gcs/cmd_mode'):
-            self._pubs[key] = session.declare_publisher(key, **_GCS_QOS[key])
+            self._pubs[key] = session.declare_publisher(key, **GCS_QOS[key])
 
         self._subs = [
-            session.declare_subscriber('nev/vehicle/mux',         self._on_mux),
-            session.declare_subscriber('nev/vehicle/twist',        self._on_twist),
-            session.declare_subscriber('nev/vehicle/network',      self._on_network),
-            session.declare_subscriber('nev/vehicle/hunter',       self._on_hunter),
-            session.declare_subscriber('nev/vehicle/estop',        self._on_estop),
-            session.declare_subscriber('nev/vehicle/cpu',          self._on_cpu),
-            session.declare_subscriber('nev/vehicle/mem',          self._on_mem),
-            session.declare_subscriber('nev/vehicle/gpu',          self._on_gpu),
-            session.declare_subscriber('nev/vehicle/disk',         self._on_disk),
-            session.declare_subscriber('nev/vehicle/net',          self._on_net),
-            session.declare_subscriber('nev/vehicle/camera',       self._on_camera),
-            session.declare_subscriber('nev/vehicle/hb_ack',       self._on_hb_ack),
-            session.declare_subscriber('nev/vehicle/video_stats',  self._on_video_stats),
+            session.declare_subscriber('nev/robot/mux',         self._on_mux),
+            session.declare_subscriber('nev/robot/twist',        self._on_twist),
+            session.declare_subscriber('nev/robot/network',      self._on_network),
+            session.declare_subscriber('nev/robot/hunter',       self._on_hunter),
+            session.declare_subscriber('nev/robot/estop',        self._on_estop),
+            session.declare_subscriber('nev/robot/cpu',          self._on_cpu),
+            session.declare_subscriber('nev/robot/mem',          self._on_mem),
+            session.declare_subscriber('nev/robot/gpu',          self._on_gpu),
+            session.declare_subscriber('nev/robot/disk',         self._on_disk),
+            session.declare_subscriber('nev/robot/net',          self._on_net),
+            session.declare_subscriber('nev/robot/camera',       self._on_camera),
+            session.declare_subscriber('nev/robot/hb_ack',       self._on_hb_ack),
+            session.declare_subscriber('nev/robot/video_stats',  self._on_video_stats),
         ]
-        logger.info('VehicleProtocol started')
+        logger.info('RobotProtocol started')
 
     def stop(self) -> None:
         for sub in self._subs:
@@ -71,8 +65,7 @@ class VehicleProtocol:
         raw = bytes(sample.payload)
         self._tele_bytes += len(raw)
         data = json.loads(raw)
-        ts = data.pop('ts', None)
-        tele_delay_ms = (time.time() - ts) * 1000.0 if ts else None
+        ts, tele_delay_ms = extract_timestamp_delay(data)
         def _update():
             self.state.update_packet('mux', data)
             self.state.update_remote_enabled(data.get('remote_enabled', False))
@@ -84,8 +77,7 @@ class VehicleProtocol:
         raw = bytes(sample.payload)
         self._tele_bytes += len(raw)
         data = json.loads(raw)
-        ts = data.pop('ts', None)
-        tele_delay_ms = (time.time() - ts) * 1000.0 if ts else None
+        ts, tele_delay_ms = extract_timestamp_delay(data)
         def _update():
             self.state.update_packet('twist', data)
             if tele_delay_ms is not None:
@@ -102,8 +94,7 @@ class VehicleProtocol:
         raw = bytes(sample.payload)
         self._tele_bytes += len(raw)
         data = json.loads(raw)
-        ts = data.pop('ts', None)
-        tele_delay_ms = (time.time() - ts) * 1000.0 if ts else None
+        ts, tele_delay_ms = extract_timestamp_delay(data)
         def _update():
             self.state.update_packet('hunter', data)
             if tele_delay_ms is not None:
@@ -114,8 +105,7 @@ class VehicleProtocol:
         raw = bytes(sample.payload)
         self._tele_bytes += len(raw)
         data = json.loads(raw)
-        ts = data.pop('ts', None)
-        tele_delay_ms = (time.time() - ts) * 1000.0 if ts else None
+        ts, tele_delay_ms = extract_timestamp_delay(data)
         def _update():
             self.state.update_packet('estop', data)
             if tele_delay_ms is not None:
@@ -163,19 +153,24 @@ class VehicleProtocol:
         self._call(_update)
 
     def _on_camera(self, sample):
-        raw = bytes(sample.payload)
-        if len(raw) <= _CAMERA_HEADER_BYTES:
-            return
-        ts, encode_ms = struct.unpack_from('dH', raw, 0)
-        nal = raw[_CAMERA_HEADER_BYTES:]
-        self._cam_bytes += len(nal)
-        video_delay_ms = (time.time() - ts) * 1000.0
-        def _update_delay():
-            self.state.network.video_net_delay = video_delay_ms
-        self._call(_update_delay)
-        asyncio.run_coroutine_threadsafe(
-            video_relay.broadcast_async(nal), self._loop
-        )
+        try:
+            raw = bytes(sample.payload)
+            if len(raw) <= self._cfg.camera_header_bytes:
+                return
+            ts, encode_ms = struct.unpack_from('dH', raw, 0)
+            nal = raw[self._cfg.camera_header_bytes:]
+            self._cam_bytes += len(nal)
+            video_delay_ms = (time.time() - ts) * 1000.0
+            def _update_delay():
+                self.state.network.video_net_delay = video_delay_ms
+            self._call(_update_delay)
+            asyncio.run_coroutine_threadsafe(
+                video_relay.broadcast_nal(nal), self._loop
+            )
+            if self._rtc_relay:
+                self._loop.call_soon_threadsafe(self._rtc_relay.broadcast_nal, nal)
+        except Exception as e:
+            logger.warning(f'camera frame parse error: {e}')
 
     def _on_video_stats(self, sample):
         raw = bytes(sample.payload)
@@ -219,7 +214,7 @@ class VehicleProtocol:
     def calc_bandwidth(self):
         now = time.time()
         dt  = now - self._bw_ts
-        if dt >= _BW_CALC_INTERVAL:
+        if dt >= self._cfg.bw_calc_interval:
             cam_mbps  = round(self._cam_bytes  * 8 / (dt * 1e6), 3)
             tele_mbps = round(self._tele_bytes * 8 / (dt * 1e6), 3)
             self._cam_bytes  = 0
@@ -232,7 +227,7 @@ class VehicleProtocol:
 
     def _next_seq(self) -> int:
         s = self._seq
-        self._seq = (self._seq + 1) % _SEQ_MAX
+        self._seq = (self._seq + 1) % self._cfg.seq_max
         return s
 
     def _zput(self, key: str, data: dict) -> None:
@@ -256,5 +251,3 @@ class VehicleProtocol:
 
     def send_cmd_mode(self, mode: int):
         self._zput('nev/gcs/cmd_mode', {'mode': mode, 'seq': self._next_seq()})
-
-

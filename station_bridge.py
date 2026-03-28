@@ -4,15 +4,17 @@ import logging
 import math
 import time
 
+from config.schema import RobotConfig
+
 logger = logging.getLogger(__name__)
 
 class StationBridge:
-    def __init__(self, state, loop: asyncio.AbstractEventLoop, vehicle_proto, cfg: dict = None): # type: ignore
+    def __init__(self, state, loop: asyncio.AbstractEventLoop, robot_proto, robot_cfg: RobotConfig):
         self._state        = state
         self._loop         = loop
-        self._proto        = vehicle_proto
+        self._proto        = robot_proto
         self._subs: list   = []
-        self._wheelbase    = (cfg or {}).get('wheelbase', 0.650)
+        self._wheelbase    = robot_cfg.wheelbase
 
     def start(self, session) -> None:
         self._subs = [
@@ -46,8 +48,10 @@ class StationBridge:
                     az = 0.0
                 elif abs(lx) < 0.05:
                     az = steer
-                else:
+                elif self._wheelbase > 0:
                     az = lx * math.tan(steer) / self._wheelbase
+                else:
+                    az = 0.0
                 self._proto.send_teleop(lx, az)
                 steer_deg = math.degrees(steer)
                 self._loop.call_soon_threadsafe(self._update_control, lx, az, steer_deg)
