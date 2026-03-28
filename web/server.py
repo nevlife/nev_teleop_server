@@ -23,7 +23,7 @@ STATIC_DIR = Path(__file__).parent / 'static'
 
 
 def create_app(state, proto):
-    app = FastAPI(title='NEV Remote Server', docs_url=None, redoc_url=None)
+    app = FastAPI(title='NEV Teleop Server', docs_url=None, redoc_url=None)
 
     app.mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static')
 

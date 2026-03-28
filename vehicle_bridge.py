@@ -6,6 +6,13 @@ import time
 
 import zenoh
 
+_GCS_QOS = {
+    'nev/gcs/heartbeat': dict(reliability=zenoh.Reliability.BEST_EFFORT,  congestion_control=zenoh.CongestionControl.DROP,  priority=zenoh.Priority.DATA_LOW),
+    'nev/gcs/teleop':    dict(reliability=zenoh.Reliability.BEST_EFFORT,  congestion_control=zenoh.CongestionControl.DROP,  priority=zenoh.Priority.INTERACTIVE_HIGH),
+    'nev/gcs/estop':     dict(reliability=zenoh.Reliability.RELIABLE,     congestion_control=zenoh.CongestionControl.BLOCK, priority=zenoh.Priority.REAL_TIME),
+    'nev/gcs/cmd_mode':  dict(reliability=zenoh.Reliability.RELIABLE,     congestion_control=zenoh.CongestionControl.BLOCK, priority=zenoh.Priority.INTERACTIVE_HIGH),
+}
+
 from state import SharedState
 from web.video_relay import video_relay
 
@@ -32,7 +39,7 @@ class VehicleProtocol:
     def start(self, session: zenoh.Session) -> None:
         for key in ('nev/gcs/heartbeat', 'nev/gcs/teleop',
                     'nev/gcs/estop', 'nev/gcs/cmd_mode'):
-            self._pubs[key] = session.declare_publisher(key)
+            self._pubs[key] = session.declare_publisher(key, **_GCS_QOS[key])
 
         self._subs = [
             session.declare_subscriber('nev/vehicle/mux',         self._on_mux),
@@ -84,7 +91,6 @@ class VehicleProtocol:
             if tele_delay_ms is not None:
                 self.state.network.tele_delay_ms = tele_delay_ms
         self._call(_update)
-        self._call(self.state._broadcast_sync)
 
     def _on_network(self, sample):
         raw = bytes(sample.payload)
@@ -252,42 +258,3 @@ class VehicleProtocol:
         self._zput('nev/gcs/cmd_mode', {'mode': mode, 'seq': self._next_seq()})
 
 
-async def run_send_loop(state: SharedState, proto: VehicleProtocol, cfg: dict):
-    hb_interval        = 1.0 / cfg.get('heartbeat_rate',   5.0)
-    push_interval      = cfg.get('state_push_interval', 0.05)  # 20 Hz
-    station_timeout    = cfg.get('station_timeout', 2.0)
-    disconnect_timeout = _DISCONNECT_TIMEOUT
-
-    last_hb   = 0.0
-    last_push = 0.0
-    _veh_disconnected = False
-
-    while True:
-        now = time.monotonic()
-
-        if state.last_vehicle_recv > 0:
-            age = now - state.last_vehicle_recv
-            if age > disconnect_timeout and not _veh_disconnected:
-                _veh_disconnected = True
-                logger.warning('Vehicle disconnected')
-            elif age < 1.0 and _veh_disconnected:
-                _veh_disconnected = False
-                logger.info('Vehicle reconnected')
-
-        if state.station_connected and state.station_last_recv > 0:
-            if now - state.station_last_recv > station_timeout:
-                logger.warning('Station heartbeat timeout — marking disconnected')
-                state.update_station_connected(False)
-
-        proto.calc_bandwidth()
-
-        if now - last_hb >= hb_interval:
-            proto.send_heartbeat()
-            last_hb = now
-
-        if now - last_push >= push_interval:
-            state._validate()
-            state._broadcast_sync()
-            last_push = now
-
-        await asyncio.sleep(0.01)

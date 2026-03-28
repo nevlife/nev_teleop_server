@@ -77,8 +77,6 @@ class ControlState:
     linear_x:           float = 0.0
     steer_angle_deg:    float = 0.0   # Steering angle (deg) — from nev_gcs
     angular_z:          float = 0.0   # Angular velocity (rad/s) — computed by server
-    raw_speed:          float = 0.0
-    raw_steer:          float = 0.0
     joystick_connected: bool  = False  # Station joystick connection state
 
 
@@ -180,6 +178,8 @@ class SharedState:
         self.alerts = alerts
 
     def _broadcast_sync(self):
+        if not self._subscribers:
+            return
         data = self.to_json()
         for q in self._subscribers[:]:
             try:

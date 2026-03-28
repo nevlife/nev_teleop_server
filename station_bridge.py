@@ -16,11 +16,11 @@ class StationBridge:
 
     def start(self, session) -> None:
         self._subs = [
-            session.declare_subscriber('nev/station/heartbeat',         self._on_heartbeat),
+            session.declare_subscriber('nev/station/client_heartbeat',   self._on_heartbeat),
             session.declare_subscriber('nev/station/teleop',            self._on_teleop),
             session.declare_subscriber('nev/station/estop',             self._on_estop),
             session.declare_subscriber('nev/station/cmd_mode',          self._on_cmd_mode),
-            session.declare_subscriber('nev/station/joystick_connected',self._on_joystick_connected),
+            session.declare_subscriber('nev/station/controller_heartbeat',self._on_joystick_connected),
         ]
         logger.info('StationBridge started')
 
@@ -40,10 +40,8 @@ class StationBridge:
         try:
             data = json.loads(bytes(sample.payload))
             if self._state.station_connected:
-                lx    = float(data.get('linear_x',     0.0))
-                steer = float(data.get('steer_angle',  0.0))
-                rs    = float(data.get('raw_speed',    0.0))
-                rt    = float(data.get('raw_steer',    0.0))
+                lx    = float(data.get('linear_x',    0.0))
+                steer = float(data.get('steer_angle', 0.0))
                 if abs(steer) < 1e-6:
                     az = 0.0
                 elif abs(lx) < 0.05:
@@ -52,7 +50,7 @@ class StationBridge:
                     az = lx * math.tan(steer) / self._wheelbase
                 self._proto.send_teleop(lx, az)
                 steer_deg = math.degrees(steer)
-                self._loop.call_soon_threadsafe(self._update_control, lx, az, steer_deg, rs, rt)
+                self._loop.call_soon_threadsafe(self._update_control, lx, az, steer_deg)
         except Exception as e:
             logger.warning(f'station teleop parse error: {e}')
 
@@ -86,14 +84,10 @@ class StationBridge:
         except Exception as e:
             logger.warning(f'station joystick_connected parse error: {e}')
 
-    def _update_control(self, lx: float, az: float, steer_deg: float = 0.0,
-                        rs: float = 0.0, rt: float = 0.0):
+    def _update_control(self, lx: float, az: float, steer_deg: float = 0.0):
         self._state.control.linear_x        = lx
         self._state.control.angular_z       = az
         self._state.control.steer_angle_deg = steer_deg
-        self._state.control.raw_speed       = rs
-        self._state.control.raw_steer       = rt
-        self._state._broadcast_sync()
 
     def _update_estop(self, active: bool):
         self._state.control.estop = active

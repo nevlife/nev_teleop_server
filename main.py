@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 import yaml
@@ -11,7 +12,7 @@ import uvicorn
 import zenoh
 
 from state import SharedState
-from vehicle_bridge import VehicleProtocol, run_send_loop
+from vehicle_bridge import VehicleProtocol, _DISCONNECT_TIMEOUT
 from station_bridge import StationBridge
 from web.server import create_app
 from web.video_relay import video_relay
@@ -59,6 +60,47 @@ def sync_zenohd_config(locator: str, zenohd_path: str = 'zenohd.json5') -> None:
         '}\n'
     )
     logger.info(f'zenohd.json5 → port {port}')
+
+
+async def run_send_loop(state: SharedState, proto: VehicleProtocol, cfg: dict):
+    hb_interval        = 1.0 / cfg.get('heartbeat_rate',   5.0)
+    push_interval      = cfg.get('state_push_interval', 0.05)  # 20 Hz
+    station_timeout    = cfg.get('station_timeout', 2.0)
+    disconnect_timeout = _DISCONNECT_TIMEOUT
+
+    last_hb   = 0.0
+    last_push = 0.0
+    _veh_disconnected = False
+
+    while True:
+        now = time.monotonic()
+
+        if state.last_vehicle_recv > 0:
+            age = now - state.last_vehicle_recv
+            if age > disconnect_timeout and not _veh_disconnected:
+                _veh_disconnected = True
+                logger.warning('Vehicle disconnected')
+            elif age < 1.0 and _veh_disconnected:
+                _veh_disconnected = False
+                logger.info('Vehicle reconnected')
+
+        if state.station_connected and state.station_last_recv > 0:
+            if now - state.station_last_recv > station_timeout:
+                logger.warning('Station heartbeat timeout — marking disconnected')
+                state.update_station_connected(False)
+
+        proto.calc_bandwidth()
+
+        if now - last_hb >= hb_interval:
+            proto.send_heartbeat()
+            last_hb = now
+
+        if now - last_push >= push_interval:
+            state._validate()
+            state._broadcast_sync()
+            last_push = now
+
+        await asyncio.sleep(0.01)
 
 
 async def run(cfg: dict):
@@ -113,7 +155,7 @@ async def run(cfg: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='NEV Remote Server')
+    parser = argparse.ArgumentParser(description='NEV Teleop Server')
     parser.add_argument('--config',       default='config.yaml')
     parser.add_argument('--zenoh-locator', default=None)
     parser.add_argument('--web-port',      type=int, default=None)
