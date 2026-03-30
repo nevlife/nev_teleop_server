@@ -40,15 +40,29 @@ function textCls(val, warnAt, errorAt) {
   return '';
 }
 
-/* ── H.265 NAL keyframe detection ── */
-function isH265Keyframe(nal) {
-  let offset = 0;
-  if (nal.length >= 4 && nal[0] === 0 && nal[1] === 0) {
-    offset = (nal[2] === 1) ? 3 : 4;
+/* ── H.264 NAL keyframe detection (scans full Access Unit) ── */
+function isH264Keyframe(buf) {
+  const len = buf.length;
+  let i = 0;
+  while (i < len - 3) {
+    // Find start code: 00 00 01 or 00 00 00 01
+    if (buf[i] === 0 && buf[i + 1] === 0) {
+      if (buf[i + 2] === 1) {
+        const nalType = buf[i + 3] & 0x1F;
+        if (nalType === 5) return true;   // IDR slice
+        i += 4;
+      } else if (i < len - 4 && buf[i + 2] === 0 && buf[i + 3] === 1) {
+        const nalType = buf[i + 4] & 0x1F;
+        if (nalType === 5) return true;   // IDR slice
+        i += 5;
+      } else {
+        i++;
+      }
+    } else {
+      i++;
+    }
   }
-  if (offset >= nal.length) return false;
-  const nalType = (nal[offset] >> 1) & 0x3F;
-  return nalType >= 16 && nalType <= 21; // BLA, IDR, CRA
+  return false;
 }
 
 class CommandCenter {
@@ -170,13 +184,14 @@ class CommandCenter {
     });
 
     this._videoDecoder.configure({
-      codec: 'hev1.1.6.L93.B0',
+      codec: 'avc1.42001E',
+      optimizeForLatency: true,
     });
   }
 
   _feedNal(nal) {
     if (!this._videoDecoder || this._videoDecoder.state === 'closed') return;
-    const isKey = isH265Keyframe(nal);
+    const isKey = isH264Keyframe(nal);
     const timestamp = this._frameCounter++;
     this._decodeTimestamps.set(timestamp, performance.now());
 
