@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Dict, Any
 import yaml
 
-from .schema import AppConfig, ZenohConfig, ServerConfig, RobotConfig, WebConfig, TelemetryConfig
+from .schema import AppConfig, ZenohConfig, ServerConfig, RobotConfig, TelemetryConfig
 
 
 def _cast(value, expected_type, field_name: str):
@@ -39,15 +39,6 @@ def load_config(path: str, overrides: Dict[str, Any] = None) -> AppConfig:
         wheelbase=_cast(cfg_dict.get('wheelbase', 0.650), float, 'wheelbase')
     )
 
-    web_cfg = WebConfig(
-        host=str(cfg_dict.get('web_host', '0.0.0.0')),
-        port=_cast(cfg_dict.get('web_port', 8080), int, 'web_port'),
-        ws_state_queue_size=_cast(cfg_dict.get('ws_state_queue_size', 20), int, 'ws_state_queue_size'),
-        ws_video_queue_size=_cast(cfg_dict.get('ws_video_queue_size', 5), int, 'ws_video_queue_size'),
-        rtc_enabled=bool(cfg_dict.get('rtc_enabled', True)),
-        rtc_stun_servers=cfg_dict.get('rtc_stun_servers', ['stun:stun.l.google.com:19302']),
-    )
-
     raw_keys = cfg_dict.get('control_keys', ['mux', 'twist', 'network', 'hunter', 'estop'])
     if not isinstance(raw_keys, list) or not all(isinstance(k, str) for k in raw_keys):
         raise ValueError(f"config field 'control_keys' must be a list of strings, got {raw_keys!r}")
@@ -64,7 +55,6 @@ def load_config(path: str, overrides: Dict[str, Any] = None) -> AppConfig:
         zenoh=zenoh_cfg,
         server=server_cfg,
         robot=robot_cfg,
-        web=web_cfg,
         telemetry=telemetry_cfg,
     )
 

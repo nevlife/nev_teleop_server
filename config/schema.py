@@ -20,16 +20,6 @@ class RobotConfig:
 
 
 @dataclass
-class WebConfig:
-    host: str = '0.0.0.0'
-    port: int = 8080
-    ws_state_queue_size: int = 20
-    ws_video_queue_size: int = 5
-    rtc_enabled: bool = True
-    rtc_stun_servers: List[str] = field(default_factory=lambda: ['stun:stun.l.google.com:19302'])
-
-
-@dataclass
 class TelemetryConfig:
     control_keys: List[str] = field(default_factory=lambda: ['mux', 'twist', 'network', 'hunter', 'estop'])
     disconnect_timeout: float = 3.0
@@ -47,7 +37,6 @@ class AppConfig:
     zenoh: ZenohConfig = field(default_factory=ZenohConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     robot: RobotConfig = field(default_factory=RobotConfig)
-    web: WebConfig = field(default_factory=WebConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
 
     def validate(self) -> None:
@@ -62,15 +51,6 @@ class AppConfig:
 
         if self.robot.wheelbase <= 0:
             raise ValueError(f"wheelbase must be positive, got {self.robot.wheelbase}")
-
-        if not (1 <= self.web.port <= 65535):
-            raise ValueError(f"port must be 1-65535, got {self.web.port}")
-
-        if self.web.ws_state_queue_size <= 0:
-            raise ValueError(f"ws_state_queue_size must be positive, got {self.web.ws_state_queue_size}")
-
-        if self.web.ws_video_queue_size <= 0:
-            raise ValueError(f"ws_video_queue_size must be positive, got {self.web.ws_video_queue_size}")
 
         if self.telemetry.disconnect_timeout <= 0:
             raise ValueError(f"disconnect_timeout must be positive, got {self.telemetry.disconnect_timeout}")

@@ -1,12 +1,9 @@
 # Zenoh router endpoint
 zenoh_locator: "tcp/127.0.0.1:7447"
 
-# Web dashboard port
-web_port: 8080
-
 # Heartbeat frequency (Hz)
 heartbeat_rate:       5.0
-# State broadcast interval (sec)
+# State validation interval (sec)
 state_push_interval:  0.5
 # Station heartbeat timeout (sec)
 station_timeout:      2.0
@@ -30,8 +27,3 @@ bw_calc_interval:     1.0
 seq_max:              65536
 # Camera packet header size: double(8B) + uint16(2B)
 camera_header_bytes:  10
-
-# WebRTC settings
-rtc_enabled:          true
-rtc_stun_servers:
-  - "stun:stun.l.google.com:19302"

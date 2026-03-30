@@ -1,4 +1,4 @@
-from .schema import AppConfig, ZenohConfig, ServerConfig, RobotConfig, WebConfig, TelemetryConfig
+from .schema import AppConfig, ZenohConfig, ServerConfig, RobotConfig, TelemetryConfig
 from .loader import load_config
 
 __all__ = [
@@ -6,7 +6,6 @@ __all__ = [
     'ZenohConfig',
     'ServerConfig',
     'RobotConfig',
-    'WebConfig',
     'TelemetryConfig',
     'load_config',
 ]

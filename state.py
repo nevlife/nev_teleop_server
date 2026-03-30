@@ -1,4 +1,3 @@
-import asyncio
 import json
 import time
 import dataclasses
@@ -37,7 +36,6 @@ class NetworkStatus:
     bw_video_tx:         float = 0.0
     encode_delay:        float = 0.0
     video_net_delay:     float = 0.0
-    browser_decode_ms:   float = 0.0
     tele_delay_ms:       float = 0.0
 
 
@@ -110,8 +108,6 @@ class SharedState:
         self.disk_partitions: list = []
         self.net_interfaces:  list = []
 
-        self._subscribers: list = []
-
     def update_packet(self, key: str, data: dict):
         obj = getattr(self, key, None)
         if obj is None:
@@ -179,34 +175,6 @@ class SharedState:
             alerts.append(Alert('warn', 'Station not connected — control unavailable'))
 
         self.alerts = alerts
-
-    def _broadcast_sync(self):
-        if not self._subscribers:
-            return
-        data = self.to_json()
-        dead = []
-        for q in self._subscribers[:]:
-            try:
-                q.put_nowait(data)
-            except asyncio.QueueFull:
-                try:
-                    q.get_nowait()
-                    q.put_nowait(data)
-                except Exception:
-                    dead.append(q)
-            except Exception:
-                dead.append(q)
-        for q in dead:
-            self.remove_subscriber(q)
-
-    def add_subscriber(self, q):
-        self._subscribers.append(q)
-
-    def remove_subscriber(self, q):
-        try:
-            self._subscribers.remove(q)
-        except ValueError:
-            pass
 
     def to_json(self) -> str:
         def _d(obj):

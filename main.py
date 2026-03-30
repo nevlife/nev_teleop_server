@@ -5,7 +5,6 @@ import json
 import logging
 import time
 
-import uvicorn
 import zenoh
 
 from config import load_config
@@ -13,8 +12,6 @@ from zenoh_utils import sync_zenohd_config
 from state import SharedState
 from robot_bridge import RobotProtocol
 from station_bridge import StationBridge
-from web.server import create_app
-from web.rtc_relay import RTCRelay
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +56,7 @@ async def run_send_loop(state: SharedState, proto: RobotProtocol, cfg):
 
         if now - last_push >= push_interval:
             state._validate()
-            state._broadcast_sync()
+            proto.send_telemetry(state.to_json())
             last_push = now
 
         next_hb   = last_hb   + hb_interval   - now
@@ -77,42 +74,23 @@ async def run(cfg):
     state = SharedState(cfg.telemetry)
     loop  = asyncio.get_running_loop()
 
-    rtc_relay = None
-    if cfg.web.rtc_enabled:
-        rtc_relay = RTCRelay(stun_servers=cfg.web.rtc_stun_servers)
-        logger.info('WebRTC DataChannel relay enabled')
-
     zconf = zenoh.Config()
     if locator:
         zconf.insert_json5('connect/endpoints', json.dumps([locator]))
     session = zenoh.open(zconf)
     logger.info(f'Zenoh session opened → {locator or "auto-discovery"}')
 
-    robot_proto = RobotProtocol(state, loop, cfg.telemetry, rtc_relay=rtc_relay)
+    robot_proto = RobotProtocol(state, loop, cfg.telemetry)
     robot_proto.start(session)
 
     station_bridge = StationBridge(state, loop, robot_proto, cfg.robot)
     station_bridge.start(session)
 
-    app = create_app(state, robot_proto, cfg.web, rtc_relay=rtc_relay)
-    uv_cfg = uvicorn.Config(
-        app,
-        host=cfg.web.host,
-        port=cfg.web.port,
-        log_level='warning',
-        loop='none',
-    )
-    server = uvicorn.Server(uv_cfg)
-    logger.info(f'Web  http://{cfg.web.host}:{cfg.web.port}')
+    logger.info('Server running (Zenoh relay only)')
 
     try:
-        await asyncio.gather(
-            run_send_loop(state, robot_proto, cfg),
-            server.serve(),
-        )
+        await run_send_loop(state, robot_proto, cfg)
     finally:
-        if rtc_relay:
-            await rtc_relay.cleanup()
         station_bridge.stop()
         robot_proto.stop()
         session.close()
@@ -123,12 +101,10 @@ def main():
     parser = argparse.ArgumentParser(description='NEV Teleop Server')
     parser.add_argument('--config',       default='config.yaml')
     parser.add_argument('--zenoh-locator', default=None)
-    parser.add_argument('--web-port',      type=int, default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config, {
         'zenoh_locator': args.zenoh_locator,
-        'web_port':      args.web_port,
     })
 
     try:

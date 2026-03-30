@@ -10,7 +10,6 @@ from zenoh_utils.protocol import GCS_QOS
 from config.schema import TelemetryConfig
 from telemetry.parser import extract_timestamp_delay
 from state import SharedState
-from web.video_relay import video_relay
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +17,10 @@ logger = logging.getLogger(__name__)
 class RobotProtocol:
 
     def __init__(self, state: SharedState, loop: asyncio.AbstractEventLoop,
-                 telemetry_cfg: TelemetryConfig = None, rtc_relay=None):
+                 telemetry_cfg: TelemetryConfig = None):
         self.state   = state
         self._loop   = loop
         self._cfg    = telemetry_cfg or TelemetryConfig()
-        self._rtc_relay = rtc_relay
         self._pubs:  dict = {}
         self._subs:  list = []
         self._seq    = 0
@@ -34,6 +32,22 @@ class RobotProtocol:
         for key in ('nev/gcs/heartbeat', 'nev/gcs/teleop',
                     'nev/gcs/estop', 'nev/gcs/cmd_mode'):
             self._pubs[key] = session.declare_publisher(key, **GCS_QOS[key])
+
+        # Telemetry publisher (state broadcast to client)
+        self._pubs['nev/gcs/telemetry'] = session.declare_publisher(
+            'nev/gcs/telemetry',
+            reliability=zenoh.Reliability.BEST_EFFORT,
+            congestion_control=zenoh.CongestionControl.DROP,
+            priority=zenoh.Priority.DATA_LOW,
+        )
+
+        # Camera passthrough publisher (H.265 NAL relay to client)
+        self._pubs['nev/gcs/camera'] = session.declare_publisher(
+            'nev/gcs/camera',
+            reliability=zenoh.Reliability.BEST_EFFORT,
+            congestion_control=zenoh.CongestionControl.DROP,
+            priority=zenoh.Priority.INTERACTIVE_HIGH,
+        )
 
         self._subs = [
             session.declare_subscriber('nev/robot/mux',         self._on_mux),
@@ -164,17 +178,13 @@ class RobotProtocol:
             if len(raw) <= self._cfg.camera_header_bytes:
                 return
             ts, encode_ms = struct.unpack_from('dH', raw, 0)
-            nal = raw[self._cfg.camera_header_bytes:]
-            self._cam_bytes += len(nal)
+            self._cam_bytes += len(raw) - self._cfg.camera_header_bytes
             video_delay_ms = (time.time() - ts) * 1000.0
             def _update_delay():
                 self.state.network.video_net_delay = video_delay_ms
             self._call(_update_delay)
-            asyncio.run_coroutine_threadsafe(
-                video_relay.broadcast_nal(nal), self._loop
-            )
-            if self._rtc_relay:
-                self._loop.call_soon_threadsafe(self._rtc_relay.broadcast_nal, nal)
+            # Passthrough: relay entire frame (header + NAL) to client
+            self._pubs['nev/gcs/camera'].put(raw)
         except Exception as e:
             logger.warning(f'camera frame parse error: {e}')
 
@@ -263,3 +273,9 @@ class RobotProtocol:
 
     def send_cmd_mode(self, mode: int):
         self._zput('nev/gcs/cmd_mode', {'mode': mode, 'seq': self._next_seq()})
+
+    def send_telemetry(self, state_json: str):
+        try:
+            self._pubs['nev/gcs/telemetry'].put(state_json)
+        except Exception as e:
+            logger.warning(f'zenoh put [nev/gcs/telemetry]: {e}')

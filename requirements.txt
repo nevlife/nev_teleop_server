@@ -1,5 +1,2 @@
 eclipse-zenoh
-fastapi
-uvicorn[standard]
 pyyaml
-aiortc
