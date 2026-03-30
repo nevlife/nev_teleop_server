@@ -9,6 +9,32 @@ logger = logging.getLogger(__name__)
 BACKPRESSURE_LIMIT = 256 * 1024  # 256 KB
 
 
+def _parse_ice_candidate(raw: str) -> RTCIceCandidate:
+    """Parse a candidate-attribute string into an RTCIceCandidate."""
+    s = raw.removeprefix('candidate:')
+    parts = s.split()
+    candidate = RTCIceCandidate(
+        foundation=parts[0],
+        component=int(parts[1]),
+        protocol=parts[2],
+        priority=int(parts[3]),
+        ip=parts[4],
+        port=int(parts[5]),
+        type=parts[7],
+    )
+    i = 8
+    while i + 1 < len(parts):
+        key, val = parts[i], parts[i + 1]
+        if key == 'raddr':
+            candidate.relatedAddress = val
+        elif key == 'rport':
+            candidate.relatedPort = int(val)
+        elif key == 'tcptype':
+            candidate.tcpType = val
+        i += 2
+    return candidate
+
+
 class RTCRelay:
 
     def __init__(self, stun_servers: List[str] = None):
@@ -67,11 +93,12 @@ class RTCRelay:
         if not pc or not candidate_data:
             return
         try:
-            candidate = RTCIceCandidate(
-                sdpMid=candidate_data.get('sdpMid'),
-                sdpMLineIndex=candidate_data.get('sdpMLineIndex'),
-                candidate=candidate_data.get('candidate', ''),
-            )
+            raw = candidate_data.get('candidate', '')
+            if not raw:
+                return
+            candidate = _parse_ice_candidate(raw)
+            candidate.sdpMid = candidate_data.get('sdpMid')
+            candidate.sdpMLineIndex = candidate_data.get('sdpMLineIndex')
             await pc.addIceCandidate(candidate)
         except Exception as e:
             logger.warning(f'ICE candidate error for peer {peer_id}: {e}')

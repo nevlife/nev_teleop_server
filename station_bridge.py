@@ -20,16 +20,11 @@ class StationBridge:
 
     def start(self, session) -> None:
         self._subs = [
-            session.declare_subscriber('nev/station/client_heartbeat',   self._on_heartbeat,
-                                       reliability=zenoh.Reliability.BEST_EFFORT),
-            session.declare_subscriber('nev/station/teleop',            self._on_teleop,
-                                       reliability=zenoh.Reliability.BEST_EFFORT),
-            session.declare_subscriber('nev/station/estop',             self._on_estop,
-                                       reliability=zenoh.Reliability.RELIABLE),
-            session.declare_subscriber('nev/station/cmd_mode',          self._on_cmd_mode,
-                                       reliability=zenoh.Reliability.RELIABLE),
-            session.declare_subscriber('nev/station/controller_heartbeat',self._on_joystick_connected,
-                                       reliability=zenoh.Reliability.BEST_EFFORT),
+            session.declare_subscriber('nev/station/client_heartbeat',    self._on_heartbeat),
+            session.declare_subscriber('nev/station/teleop',             self._on_teleop),
+            session.declare_subscriber('nev/station/estop',              self._on_estop),
+            session.declare_subscriber('nev/station/cmd_mode',           self._on_cmd_mode),
+            session.declare_subscriber('nev/station/controller_heartbeat', self._on_joystick_connected),
         ]
         logger.info('StationBridge started')
 
