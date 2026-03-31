@@ -30,7 +30,6 @@ class TwistValues:
 class NetworkStatus:
     connected:           bool  = False
     status_code:         int   = 2
-    ht_rtt:              float = 0.0
     bw_video_rx:         float = 0.0
     bw_telemetry:        float = 0.0
     bw_video_tx:         float = 0.0

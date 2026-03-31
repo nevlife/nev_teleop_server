@@ -13,6 +13,10 @@ from state import SharedState
 
 logger = logging.getLogger(__name__)
 
+# Relay header: vehicle_ts(8) + encode_ms(2) + server_rx_ts(8) + veh_to_srv_ms(2) = 20 bytes
+RELAY_HEADER_FMT  = 'dHdH'
+RELAY_HEADER_SIZE = struct.calcsize(RELAY_HEADER_FMT)   # 20
+
 
 class RobotProtocol:
 
@@ -61,7 +65,6 @@ class RobotProtocol:
             session.declare_subscriber('nev/robot/disk',        self._on_disk),
             session.declare_subscriber('nev/robot/net',         self._on_net),
             session.declare_subscriber('nev/robot/camera',      self._on_camera),
-            session.declare_subscriber('nev/robot/hb_ack',      self._on_hb_ack),
             session.declare_subscriber('nev/robot/video_stats', self._on_video_stats),
         ]
         logger.info('RobotProtocol started')
@@ -176,15 +179,24 @@ class RobotProtocol:
         try:
             raw = bytes(sample.payload)
             if len(raw) <= self._cfg.camera_header_bytes:
+                logger.debug(f'camera: skipped tiny frame ({len(raw)}B)')
                 return
+            server_rx_ts = time.time()
             ts, encode_ms = struct.unpack_from('dH', raw, 0)
-            self._cam_bytes += len(raw) - self._cfg.camera_header_bytes
-            video_delay_ms = (time.time() - ts) * 1000.0
+            nal_data = raw[self._cfg.camera_header_bytes:]
+            nal_size = len(nal_data)
+            self._cam_bytes += nal_size
+            veh_to_srv_ms = max(0.0, (server_rx_ts - ts) * 1000.0)
+            logger.debug(f'camera rx: {nal_size}B  enc={encode_ms}ms  delay={veh_to_srv_ms:.1f}ms')
             def _update_delay():
-                self.state.network.video_net_delay = video_delay_ms
+                self.state.network.video_net_delay = veh_to_srv_ms
             self._call(_update_delay)
-            # Passthrough: relay entire frame (header + NAL) to client
-            self._pubs['nev/gcs/camera'].put(raw)
+            # Build extended relay header for client
+            relay_header = struct.pack(
+                RELAY_HEADER_FMT,
+                ts, encode_ms, server_rx_ts, min(int(veh_to_srv_ms), 65535),
+            )
+            self._pubs['nev/gcs/camera'].put(relay_header + nal_data)
         except Exception as e:
             logger.warning(f'camera frame parse error: {e}')
 
@@ -195,17 +207,6 @@ class RobotProtocol:
             self.state.network.bw_video_tx  = data.get('bw_mbps', 0.0)
             self.state.network.encode_delay = data.get('encode_ms', 0.0)
         self._call(_update)
-
-    def _on_hb_ack(self, sample):
-        raw = bytes(sample.payload)
-        self._tele_bytes += len(raw)
-        data = json.loads(raw)
-        ts = data.get('ts', 0.0)
-        if ts > 0:
-            rtt_ms = max(0.0, (time.time() - ts) * 1000.0)
-            def _update():
-                self.state.network.ht_rtt = rtt_ms
-            self._call(_update)
 
     def _on_net(self, sample):
         raw = bytes(sample.payload)
@@ -259,7 +260,7 @@ class RobotProtocol:
             logger.warning(f'zenoh put [{key}]: {e}')
 
     def send_heartbeat(self):
-        self._zput('nev/gcs/heartbeat', {'ts': time.time(), 'seq': self._next_seq()})
+        self._zput('nev/gcs/heartbeat', {'seq': self._next_seq()})
 
     def send_teleop(self, linear_x: float, angular_z: float):
         self._zput('nev/gcs/teleop', {

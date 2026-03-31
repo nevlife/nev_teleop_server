@@ -18,6 +18,7 @@ logging.basicConfig(
     format='%(asctime)s  %(levelname)-7s  %(name)s: %(message)s',
     datefmt='%H:%M:%S',
 )
+logging.getLogger('robot_bridge').setLevel(logging.DEBUG)
 logger = logging.getLogger('main')
 
 
@@ -76,9 +77,15 @@ async def run(cfg):
 
     zconf = zenoh.Config()
     if locator:
-        zconf.insert_json5('connect/endpoints', json.dumps([locator]))
+        # 서버가 직접 라우터 역할 — 다른 컴포넌트가 여기로 연결
+        import re
+        m = re.search(r'(tcp|udp)/(.+:\d+)', locator)
+        if m:
+            listen_ep = f'tcp/0.0.0.0:{m.group(2).split(":")[-1]}'
+            zconf.insert_json5('mode', '"router"')
+            zconf.insert_json5('listen/endpoints', json.dumps([listen_ep]))
     session = zenoh.open(zconf)
-    logger.info(f'Zenoh session opened → {locator or "auto-discovery"}')
+    logger.info(f'Zenoh router opened → listening on {listen_ep if locator else "auto-discovery"}')
 
     robot_proto = RobotProtocol(state, loop, cfg.telemetry)
     robot_proto.start(session)
