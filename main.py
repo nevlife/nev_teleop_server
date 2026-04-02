@@ -65,6 +65,7 @@ async def run_send_loop(state: SharedState, proto: RobotProtocol, cfg):
             state_json = state.to_json()
             proto.send_telemetry(state_json)
             update_telemetry(state_json)
+            state.network.relay_max_ms = 0.0
             last_push = now
 
         if now - last_ping >= ping_interval:

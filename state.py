@@ -37,6 +37,7 @@ class NetworkStatus:
     video_net_delay:     float = 0.0
     tele_delay_ms:       float = 0.0
     rtt_server_bot_ms:   float = 0.0
+    relay_max_ms:        float = 0.0
 
 
 @dataclass

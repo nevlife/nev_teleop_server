@@ -177,9 +177,9 @@ class RobotProtocol:
 
     def _on_camera(self, sample):
         try:
+            t0 = time.perf_counter()
             raw = bytes(sample.payload)
             if len(raw) <= self._cfg.camera_header_bytes:
-                logger.debug(f'camera: skipped tiny frame ({len(raw)}B)')
                 return
             server_rx_ts = time.time()
             ts, encode_ms = struct.unpack_from('dH', raw, 0)
@@ -188,15 +188,18 @@ class RobotProtocol:
             self._cam_bytes += nal_size
             veh_to_srv_ms = max(0.0, (server_rx_ts - ts) * 1000.0)
             logger.debug(f'camera rx: {nal_size}B  enc={encode_ms}ms  delay={veh_to_srv_ms:.1f}ms')
-            def _update_delay():
-                self.state.network.video_net_delay = veh_to_srv_ms
-            self._call(_update_delay)
             out = bytearray(RELAY_HEADER_SIZE + nal_size)
             struct.pack_into(RELAY_HEADER_FMT, out, 0,
                              ts, encode_ms, server_rx_ts, min(int(veh_to_srv_ms), 65535))
             out[RELAY_HEADER_SIZE:] = memoryview(raw)[hdr_size:]
             self._pubs['nev/gcs/camera'].put(bytes(out))
             update_video_frame(bytes(memoryview(raw)[hdr_size:]))
+            relay_ms = (time.perf_counter() - t0) * 1000.0
+            def _update():
+                self.state.network.video_net_delay = veh_to_srv_ms
+                if relay_ms > self.state.network.relay_max_ms:
+                    self.state.network.relay_max_ms = relay_ms
+            self._call(_update)
         except Exception as e:
             logger.warning(f'camera frame parse error: {e}')
 
