@@ -7,6 +7,8 @@ heartbeat_rate:       5.0
 state_push_interval:  0.5
 # Station heartbeat timeout (sec)
 station_timeout:      2.0
+# RTT ping frequency (Hz)
+ping_rate:            1.0
 
 # Robot wheelbase for Ackermann steering (m)
 wheelbase:            0.650

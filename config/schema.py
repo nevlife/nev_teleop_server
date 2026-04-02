@@ -12,6 +12,7 @@ class ServerConfig:
     heartbeat_rate: float = 5.0
     state_push_interval: float = 0.5
     station_timeout: float = 2.0
+    ping_rate: float = 1.0
 
 
 @dataclass
@@ -48,6 +49,9 @@ class AppConfig:
 
         if self.server.station_timeout <= 0:
             raise ValueError(f"station_timeout must be positive, got {self.server.station_timeout}")
+
+        if self.server.ping_rate <= 0:
+            raise ValueError(f"ping_rate must be positive, got {self.server.ping_rate}")
 
         if self.robot.wheelbase <= 0:
             raise ValueError(f"wheelbase must be positive, got {self.robot.wheelbase}")

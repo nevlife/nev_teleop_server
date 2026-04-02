@@ -22,4 +22,14 @@ GCS_QOS = {
         congestion_control=zenoh.CongestionControl.BLOCK,
         priority=zenoh.Priority.INTERACTIVE_HIGH
     ),
+    'nev/gcs/ping': dict(
+        reliability=zenoh.Reliability.BEST_EFFORT,
+        congestion_control=zenoh.CongestionControl.DROP,
+        priority=zenoh.Priority.DATA_LOW,
+    ),
+    'nev/gcs/station_pong': dict(
+        reliability=zenoh.Reliability.BEST_EFFORT,
+        congestion_control=zenoh.CongestionControl.DROP,
+        priority=zenoh.Priority.DATA_LOW,
+    ),
 }

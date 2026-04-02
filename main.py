@@ -12,6 +12,7 @@ from zenoh_utils import sync_zenohd_config
 from state import SharedState
 from robot_bridge import RobotProtocol
 from station_bridge import StationBridge
+from web.app import start_web, update_telemetry, update_video_frame
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,8 +29,11 @@ async def run_send_loop(state: SharedState, proto: RobotProtocol, cfg):
     station_timeout    = cfg.server.station_timeout
     disconnect_timeout = cfg.telemetry.disconnect_timeout
 
+    ping_interval      = 1.0 / cfg.server.ping_rate
+
     last_hb   = 0.0
     last_push = 0.0
+    last_ping = 0.0
     _veh_disconnected = False
 
     while True:
@@ -50,6 +54,7 @@ async def run_send_loop(state: SharedState, proto: RobotProtocol, cfg):
                 state.update_station_connected(False)
 
         proto.calc_bandwidth()
+        proto.check_rtt_stale()
 
         if now - last_hb >= hb_interval:
             proto.send_heartbeat()
@@ -57,16 +62,23 @@ async def run_send_loop(state: SharedState, proto: RobotProtocol, cfg):
 
         if now - last_push >= push_interval:
             state._validate()
-            proto.send_telemetry(state.to_json())
+            state_json = state.to_json()
+            proto.send_telemetry(state_json)
+            update_telemetry(state_json)
             last_push = now
+
+        if now - last_ping >= ping_interval:
+            proto.send_ping()
+            last_ping = now
 
         next_hb   = last_hb   + hb_interval   - now
         next_push = last_push + push_interval  - now
-        sleep_for = max(0.001, min(next_hb, next_push))
+        next_ping = last_ping + ping_interval  - now
+        sleep_for = max(0.001, min(next_hb, next_push, next_ping))
         await asyncio.sleep(sleep_for)
 
 
-async def run(cfg):
+async def run(cfg, web_port=8000):
     locator = cfg.zenoh.locator
 
     if locator:
@@ -77,7 +89,6 @@ async def run(cfg):
 
     zconf = zenoh.Config()
     if locator:
-        # 서버가 직접 라우터 역할 — 다른 컴포넌트가 여기로 연결
         import re
         m = re.search(r'(tcp|udp)/(.+:\d+)', locator)
         if m:
@@ -93,7 +104,9 @@ async def run(cfg):
     station_bridge = StationBridge(state, loop, robot_proto, cfg.robot)
     station_bridge.start(session)
 
-    logger.info('Server running (Zenoh relay only)')
+    start_web(state, robot_proto, port=web_port)
+
+    logger.info('Server running (Zenoh relay + web dashboard)')
 
     try:
         await run_send_loop(state, robot_proto, cfg)
@@ -108,6 +121,7 @@ def main():
     parser = argparse.ArgumentParser(description='NEV Teleop Server')
     parser.add_argument('--config',       default='config.yaml')
     parser.add_argument('--zenoh-locator', default=None)
+    parser.add_argument('--web-port', type=int, default=8000)
     args = parser.parse_args()
 
     cfg = load_config(args.config, {
@@ -115,7 +129,7 @@ def main():
     })
 
     try:
-        asyncio.run(run(cfg))
+        asyncio.run(run(cfg, web_port=args.web_port))
     except KeyboardInterrupt:
         logger.info('Stopped by user')
 

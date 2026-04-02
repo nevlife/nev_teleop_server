@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEV Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Top bar -->
+  <div class="topbar">
+    <span class="title">NEV DASHBOARD</span>
+    <span class="spacer"></span>
+    <span id="badge-veh" class="badge">VEH</span>
+    <span id="badge-stas" class="badge">STAS</span>
+    <span id="badge-joy" class="badge">JOY</span>
+    <span id="badge-rem" class="badge">REM</span>
+    <span id="ws-status" class="ws-status disconnected">WS</span>
+    <span id="clock" class="clock">--:--:--</span>
+  </div>
+
+  <!-- Command bar -->
+  <div class="cmdbar">
+    <span class="label">MODE</span>
+    <button class="mode-btn" data-mode="-1">IDLE</button>
+    <button class="mode-btn" data-mode="0">CTRL</button>
+    <button class="mode-btn" data-mode="1">NAV</button>
+    <button class="mode-btn" data-mode="2">REMOTE</button>
+    <span class="spacer"></span>
+    <button id="estop-btn" class="estop-btn">&#9632; E-STOP</button>
+  </div>
+
+  <!-- Cards -->
+  <div class="cards">
+    <div class="card" id="card-hunter"><div class="card-title">HUNTER</div><div class="card-body" id="body-hunter"></div></div>
+    <div class="card" id="card-mux"><div class="card-title">MUX</div><div class="card-body" id="body-mux"></div></div>
+    <div class="card" id="card-network"><div class="card-title">NETWORK</div><div class="card-body" id="body-network"></div></div>
+    <div class="card" id="card-twist"><div class="card-title">TWIST</div><div class="card-body" id="body-twist"></div></div>
+    <div class="card" id="card-estop"><div class="card-title">E-STOP</div><div class="card-body" id="body-estop"></div></div>
+    <div class="card" id="card-joystick"><div class="card-title">JOYSTICK</div><div class="card-body" id="body-joystick"></div></div>
+    <div class="card" id="card-resources"><div class="card-title">RESOURCES</div><div class="card-body" id="body-resources"></div></div>
+    <div class="card" id="card-netifaces"><div class="card-title">NET INTERFACES</div><div class="card-body" id="body-netifaces"></div></div>
+    <div class="card" id="card-disk"><div class="card-title">DISK</div><div class="card-body" id="body-disk"></div></div>
+    <div class="card" id="card-alerts"><div class="card-title">ALERTS</div><div class="card-body" id="body-alerts"></div></div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

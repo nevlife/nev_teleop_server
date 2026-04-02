@@ -7,6 +7,7 @@ import time
 import zenoh
 
 from config.schema import RobotConfig
+from zenoh_utils.protocol import GCS_QOS
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class StationBridge:
         self._loop         = loop
         self._proto        = robot_proto
         self._subs: list   = []
+        self._pubs: dict   = {}
         self._wheelbase    = robot_cfg.wheelbase
 
     def start(self, session) -> None:
@@ -25,12 +27,16 @@ class StationBridge:
             session.declare_subscriber('nev/station/estop',              self._on_estop),
             session.declare_subscriber('nev/station/cmd_mode',           self._on_cmd_mode),
             session.declare_subscriber('nev/station/controller_heartbeat', self._on_joystick_connected),
+            session.declare_subscriber('nev/station/ping',               self._on_station_ping),
         ]
+        self._pubs['nev/gcs/station_pong'] = session.declare_publisher('nev/gcs/station_pong', **GCS_QOS['nev/gcs/station_pong'])
         logger.info('StationBridge started')
 
     def stop(self) -> None:
         for sub in self._subs:
             sub.undeclare()
+        for pub in self._pubs.values():
+            pub.undeclare()
 
     def _on_heartbeat(self, sample):
         self._loop.call_soon_threadsafe(self._recv_heartbeat)
@@ -89,6 +95,16 @@ class StationBridge:
             )
         except Exception as e:
             logger.warning(f'station joystick_connected parse error: {e}')
+
+    def _on_station_ping(self, sample):
+        try:
+            data = json.loads(bytes(sample.payload))
+            ts = data.get('ts')
+            if ts is None:
+                return
+            self._pubs['nev/gcs/station_pong'].put(json.dumps({'ts': ts}))
+        except Exception as e:
+            logger.warning(f'station ping parse error: {e}')
 
     def _update_control(self, lx: float, az: float, steer_deg: float = 0.0):
         self._state.control.linear_x        = lx

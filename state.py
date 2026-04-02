@@ -36,6 +36,7 @@ class NetworkStatus:
     encode_delay:        float = 0.0
     video_net_delay:     float = 0.0
     tele_delay_ms:       float = 0.0
+    rtt_server_bot_ms:   float = 0.0
 
 
 @dataclass
@@ -96,6 +97,7 @@ class SharedState:
         self.remote_enabled: bool = False
         self.control   = ControlState()
         self.alerts: List[Alert] = []
+        self.video_stats: dict = {}
 
         self.last_robot_recv: float = 0.0
         self.last_control_recv: float = 0.0
@@ -196,4 +198,5 @@ class SharedState:
             'server_time':       time.time(),
             'robot_age':         (time.monotonic() - self.last_control_recv)
                                  if self.last_control_recv > 0 else -1,
+            'video_stats':       self.video_stats,
         })

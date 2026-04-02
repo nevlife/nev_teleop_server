@@ -10,12 +10,12 @@ from zenoh_utils.protocol import GCS_QOS
 from config.schema import TelemetryConfig
 from telemetry.parser import extract_timestamp_delay
 from state import SharedState
+from web.app import update_video_frame
 
 logger = logging.getLogger(__name__)
 
-# Relay header: vehicle_ts(8) + encode_ms(2) + server_rx_ts(8) + veh_to_srv_ms(2) = 20 bytes
 RELAY_HEADER_FMT  = 'dHdH'
-RELAY_HEADER_SIZE = struct.calcsize(RELAY_HEADER_FMT)   # 20
+RELAY_HEADER_SIZE = struct.calcsize(RELAY_HEADER_FMT)
 
 
 class RobotProtocol:
@@ -31,13 +31,13 @@ class RobotProtocol:
         self._cam_bytes  = 0
         self._tele_bytes = 0
         self._bw_ts      = time.time()
+        self._last_bot_pong = 0.0
 
     def start(self, session: zenoh.Session) -> None:
         for key in ('nev/gcs/heartbeat', 'nev/gcs/teleop',
-                    'nev/gcs/estop', 'nev/gcs/cmd_mode'):
+                    'nev/gcs/estop', 'nev/gcs/cmd_mode', 'nev/gcs/ping'):
             self._pubs[key] = session.declare_publisher(key, **GCS_QOS[key])
 
-        # Telemetry publisher (state broadcast to client)
         self._pubs['nev/gcs/telemetry'] = session.declare_publisher(
             'nev/gcs/telemetry',
             reliability=zenoh.Reliability.BEST_EFFORT,
@@ -45,7 +45,6 @@ class RobotProtocol:
             priority=zenoh.Priority.DATA_LOW,
         )
 
-        # Camera passthrough publisher (H.265 NAL relay to client)
         self._pubs['nev/gcs/camera'] = session.declare_publisher(
             'nev/gcs/camera',
             reliability=zenoh.Reliability.BEST_EFFORT,
@@ -66,6 +65,7 @@ class RobotProtocol:
             session.declare_subscriber('nev/robot/net',         self._on_net),
             session.declare_subscriber('nev/robot/camera',      self._on_camera),
             session.declare_subscriber('nev/robot/video_stats', self._on_video_stats),
+            session.declare_subscriber('nev/robot/pong',        self._on_robot_pong),
         ]
         logger.info('RobotProtocol started')
 
@@ -183,20 +183,20 @@ class RobotProtocol:
                 return
             server_rx_ts = time.time()
             ts, encode_ms = struct.unpack_from('dH', raw, 0)
-            nal_data = raw[self._cfg.camera_header_bytes:]
-            nal_size = len(nal_data)
+            hdr_size = self._cfg.camera_header_bytes
+            nal_size = len(raw) - hdr_size
             self._cam_bytes += nal_size
             veh_to_srv_ms = max(0.0, (server_rx_ts - ts) * 1000.0)
             logger.debug(f'camera rx: {nal_size}B  enc={encode_ms}ms  delay={veh_to_srv_ms:.1f}ms')
             def _update_delay():
                 self.state.network.video_net_delay = veh_to_srv_ms
             self._call(_update_delay)
-            # Build extended relay header for client
-            relay_header = struct.pack(
-                RELAY_HEADER_FMT,
-                ts, encode_ms, server_rx_ts, min(int(veh_to_srv_ms), 65535),
-            )
-            self._pubs['nev/gcs/camera'].put(relay_header + nal_data)
+            out = bytearray(RELAY_HEADER_SIZE + nal_size)
+            struct.pack_into(RELAY_HEADER_FMT, out, 0,
+                             ts, encode_ms, server_rx_ts, min(int(veh_to_srv_ms), 65535))
+            out[RELAY_HEADER_SIZE:] = memoryview(raw)[hdr_size:]
+            self._pubs['nev/gcs/camera'].put(bytes(out))
+            update_video_frame(bytes(memoryview(raw)[hdr_size:]))
         except Exception as e:
             logger.warning(f'camera frame parse error: {e}')
 
@@ -204,8 +204,9 @@ class RobotProtocol:
         raw = bytes(sample.payload)
         data = json.loads(raw)
         def _update():
-            self.state.network.bw_video_tx  = data.get('bw_mbps', 0.0)
-            self.state.network.encode_delay = data.get('encode_ms', 0.0)
+            self.state.network.bw_video_tx   = data.get('bw_mbps', 0.0)
+            self.state.network.encode_delay  = data.get('enc_avg_ms', 0.0)
+            self.state.video_stats = data
         self._call(_update)
 
     def _on_net(self, sample):
@@ -274,6 +275,37 @@ class RobotProtocol:
 
     def send_cmd_mode(self, mode: int):
         self._zput('nev/gcs/cmd_mode', {'mode': mode, 'seq': self._next_seq()})
+
+    def send_ping(self):
+        logger.debug('sending ping to bot')
+        self._zput('nev/gcs/ping', {'ts': time.time()})
+
+    def _on_robot_pong(self, sample):
+        try:
+            data = json.loads(bytes(sample.payload))
+            ts = data.get('ts')
+            if ts is None:
+                return
+            rtt_ms = (time.time() - ts) * 1000.0
+            if rtt_ms < 0:
+                return
+            logger.debug(f'bot pong received: rtt={rtt_ms:.1f}ms')
+            self._call(self._update_bot_rtt, rtt_ms)
+        except Exception as e:
+            logger.warning(f'robot pong parse error: {e}')
+
+    def _update_bot_rtt(self, rtt_ms: float):
+        prev = self.state.network.rtt_server_bot_ms
+        if prev > 0:
+            smoothed = 0.7 * prev + 0.3 * rtt_ms
+        else:
+            smoothed = rtt_ms
+        self.state.network.rtt_server_bot_ms = round(smoothed, 1)
+        self._last_bot_pong = time.monotonic()
+
+    def check_rtt_stale(self):
+        if self._last_bot_pong > 0 and (time.monotonic() - self._last_bot_pong) > 3.0:
+            self.state.network.rtt_server_bot_ms = 0.0
 
     def send_telemetry(self, state_json: str):
         try:
