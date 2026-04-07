@@ -1,5 +1,5 @@
 # Zenoh router endpoint
-zenoh_locator: "tcp/127.0.0.1:7447"
+zenoh_locator: "tcp/203.250.33.86:7447"
 
 # Heartbeat frequency (Hz)
 heartbeat_rate:       5.0
