@@ -14,7 +14,7 @@ from web.app import update_video_frame
 
 logger = logging.getLogger(__name__)
 
-RELAY_HEADER_FMT  = 'dHdH'
+RELAY_HEADER_FMT  = 'dfdf'
 RELAY_HEADER_SIZE = struct.calcsize(RELAY_HEADER_FMT)
 
 
@@ -182,15 +182,15 @@ class RobotProtocol:
             if len(raw) <= self._cfg.camera_header_bytes:
                 return
             server_rx_ts = time.time()
-            ts, encode_ms = struct.unpack_from('dH', raw, 0)
+            ts, encode_ms = struct.unpack_from('df', raw, 0)
             hdr_size = self._cfg.camera_header_bytes
             nal_size = len(raw) - hdr_size
-            self._cam_bytes += nal_size
+            self._cam_bytes += len(raw)
             veh_to_srv_ms = max(0.0, (server_rx_ts - ts) * 1000.0)
             logger.debug(f'camera rx: {nal_size}B  enc={encode_ms}ms  delay={veh_to_srv_ms:.1f}ms')
             out = bytearray(RELAY_HEADER_SIZE + nal_size)
             struct.pack_into(RELAY_HEADER_FMT, out, 0,
-                             ts, encode_ms, server_rx_ts, min(int(veh_to_srv_ms), 65535))
+                             ts, encode_ms, server_rx_ts, veh_to_srv_ms)
             out[RELAY_HEADER_SIZE:] = memoryview(raw)[hdr_size:]
             self._pubs['nev/gcs/camera'].put(bytes(out))
             update_video_frame(bytes(memoryview(raw)[hdr_size:]))

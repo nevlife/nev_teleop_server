@@ -27,5 +27,5 @@ disconnect_timeout:   3.0
 bw_calc_interval:     1.0
 # Sequence number wrap limit (uint16)
 seq_max:              65536
-# Camera packet header size: double(8B) + uint16(2B)
-camera_header_bytes:  10
+# Camera packet header size: double(8B) + float(4B)
+camera_header_bytes:  12

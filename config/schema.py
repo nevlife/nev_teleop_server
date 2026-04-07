@@ -26,7 +26,7 @@ class TelemetryConfig:
     disconnect_timeout: float = 3.0
     bw_calc_interval: float = 1.0
     seq_max: int = 65536
-    camera_header_bytes: int = 10
+    camera_header_bytes: int = 12
 
     @property
     def control_keys_set(self) -> frozenset:

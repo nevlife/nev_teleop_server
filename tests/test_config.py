@@ -31,7 +31,7 @@ class TestSchemaDefaults:
         assert c.disconnect_timeout == 3.0
         assert c.bw_calc_interval == 1.0
         assert c.seq_max == 65536
-        assert c.camera_header_bytes == 10
+        assert c.camera_header_bytes == 12
         assert set(c.control_keys) == {'mux', 'twist', 'network', 'hunter', 'estop'}
 
     def test_telemetry_control_keys_set(self):

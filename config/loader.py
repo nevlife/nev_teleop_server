@@ -48,7 +48,7 @@ def load_config(path: str, overrides: Dict[str, Any] = None) -> AppConfig:
         disconnect_timeout=_cast(cfg_dict.get('disconnect_timeout', 3.0), float, 'disconnect_timeout'),
         bw_calc_interval=_cast(cfg_dict.get('bw_calc_interval', 1.0), float, 'bw_calc_interval'),
         seq_max=_cast(cfg_dict.get('seq_max', 65536), int, 'seq_max'),
-        camera_header_bytes=_cast(cfg_dict.get('camera_header_bytes', 10), int, 'camera_header_bytes'),
+        camera_header_bytes=_cast(cfg_dict.get('camera_header_bytes', 12), int, 'camera_header_bytes'),
     )
 
     config = AppConfig(
