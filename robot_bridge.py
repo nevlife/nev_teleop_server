@@ -245,17 +245,6 @@ class RobotProtocol:
 
             self._call(_update)
 
-        elif topic.startswith("vehicle/"):
-            subtopic = topic.split("/", 1)[1]
-
-            def _update():
-                veh = self.state.get_vehicle(vehicle_id)
-                veh.vehicle_update(subtopic, data)
-                if tele_delay_ms is not None:
-                    veh.network.tele_delay_ms = tele_delay_ms
-
-            self._call(_update)
-
         else:
             logger.debug(f"Unknown robot topic: nev/robot/{vehicle_id}/{topic}")
 

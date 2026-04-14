@@ -25,6 +25,8 @@ class TwistValues:
     teleop_az: float = 0.0
     final_lx: float = 0.0
     final_az: float = 0.0
+    current_speed: float = 0.0
+    current_steer_angle: float = 0.0
 
 
 @dataclass
@@ -85,7 +87,6 @@ class VehicleState:
         self.network = NetworkStatus()
         self.estop = EStopStatus()
         self.resources = SystemResources()
-        self.vehicle: dict[str, dict] = {}
         self.remote_enabled: bool = False
         self.video_stats: dict = {}
 
@@ -127,12 +128,6 @@ class VehicleState:
         self._upsert_list(self.net_interfaces, idx, data)
         self.last_robot_recv = time.monotonic()
 
-    def vehicle_update(self, subtopic: str, data: dict):
-        self.vehicle[subtopic] = data
-        now = time.monotonic()
-        self.last_robot_recv = now
-        self.last_control_recv = now
-
     def update_remote_enabled(self, val: bool):
         self.remote_enabled = val
 
@@ -147,7 +142,6 @@ class VehicleState:
             "network": _d(self.network),
             "estop": _d(self.estop),
             "resources": _d(self.resources),
-            "vehicle": self.vehicle,
             "gpu_list": self.gpu_list,
             "disk_partitions": self.disk_partitions,
             "net_interfaces": self.net_interfaces,
