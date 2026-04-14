@@ -1,24 +1,18 @@
-# Zenoh router endpoint
-zenoh_locator: "tcp/203.250.33.86:7447"
+# Zenoh router listen port
+zenoh_port: 7447
 
-# Heartbeat frequency (Hz)
-heartbeat_rate:       5.0
-# State validation interval (sec)
-state_push_interval:  0.5
+# Telemetry push frequency (Hz)
+telemetry_rate:       2.0
 # Station heartbeat timeout (sec)
-station_timeout:      2.0
+station_timeout:      3.0
 # RTT ping frequency (Hz)
 ping_rate:            1.0
-
-# Robot wheelbase for Ackermann steering (m)
-wheelbase:            0.650
 
 # Keys that update last_control_recv timestamp
 control_keys:
   - mux
   - twist
   - network
-  - hunter
   - estop
 
 # Robot disconnect threshold (sec)

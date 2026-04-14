@@ -57,41 +57,41 @@ class TestSendMethods:
     def test_send_heartbeat(self):
         proto, _, _ = make_proto()
         mock_pub = MagicMock()
-        proto._pubs['nev/gcs/heartbeat'] = mock_pub
+        proto._pubs["nev/gcs/heartbeat"] = mock_pub
         proto.send_heartbeat()
         mock_pub.put.assert_called_once()
         data = json.loads(mock_pub.put.call_args[0][0])
-        assert 'ts' in data
-        assert 'seq' in data
+        assert "ts" in data
+        assert "seq" in data
 
     def test_send_teleop(self):
         proto, _, _ = make_proto()
         mock_pub = MagicMock()
-        proto._pubs['nev/gcs/teleop'] = mock_pub
+        proto._pubs["nev/gcs/teleop"] = mock_pub
         proto.send_teleop(1.5, 0.3)
         data = json.loads(mock_pub.put.call_args[0][0])
-        assert data['linear_x'] == 1.5
-        assert data['angular_z'] == 0.3
+        assert data["linear_x"] == 1.5
+        assert data["angular_z"] == 0.3
 
     def test_send_estop(self):
         proto, _, _ = make_proto()
         mock_pub = MagicMock()
-        proto._pubs['nev/gcs/estop'] = mock_pub
+        proto._pubs["nev/gcs/estop"] = mock_pub
         proto.send_estop(True)
         data = json.loads(mock_pub.put.call_args[0][0])
-        assert data['active'] is True
+        assert data["active"] is True
 
     def test_send_cmd_mode(self):
         proto, _, _ = make_proto()
         mock_pub = MagicMock()
-        proto._pubs['nev/gcs/cmd_mode'] = mock_pub
+        proto._pubs["nev/gcs/cmd_mode"] = mock_pub
         proto.send_cmd_mode(2)
         data = json.loads(mock_pub.put.call_args[0][0])
-        assert data['mode'] == 2
+        assert data["mode"] == 2
 
     def test_zput_exception_no_crash(self):
         proto, _, _ = make_proto()
         mock_pub = MagicMock()
         mock_pub.put.side_effect = RuntimeError("connection lost")
-        proto._pubs['nev/gcs/heartbeat'] = mock_pub
+        proto._pubs["nev/gcs/heartbeat"] = mock_pub
         proto.send_heartbeat()

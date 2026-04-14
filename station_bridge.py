@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import math
@@ -6,109 +5,122 @@ import time
 
 import zenoh
 
-from config.schema import RobotConfig
-from zenoh_utils.protocol import GCS_QOS
-
 logger = logging.getLogger(__name__)
 
+
 class StationBridge:
-    def __init__(self, state, loop: asyncio.AbstractEventLoop, robot_proto, robot_cfg: RobotConfig):
-        self._state        = state
-        self._loop         = loop
-        self._proto        = robot_proto
-        self._subs: list   = []
-        self._pubs: dict   = {}
-        self._wheelbase    = robot_cfg.wheelbase
+    def __init__(self, state, loop, robot_proto):
+        self._state = state
+        self._loop = loop
+        self._proto = robot_proto
+        self._subs: list = []
 
     def start(self, session) -> None:
+        # nev/station/{vehicle_id}/{topic}
+        self._session = session
         self._subs = [
-            session.declare_subscriber('nev/station/client_heartbeat',    self._on_heartbeat),
-            session.declare_subscriber('nev/station/teleop',             self._on_teleop),
-            session.declare_subscriber('nev/station/estop',              self._on_estop),
-            session.declare_subscriber('nev/station/cmd_mode',           self._on_cmd_mode),
-            session.declare_subscriber('nev/station/controller_heartbeat', self._on_joystick_connected),
-            session.declare_subscriber('nev/station/ping',               self._on_station_ping),
+            session.declare_subscriber("nev/station/**", self._on_station),
         ]
-        self._pubs['nev/gcs/station_pong'] = session.declare_publisher('nev/gcs/station_pong', **GCS_QOS['nev/gcs/station_pong'])
-        logger.info('StationBridge started')
+        logger.info("StationBridge started (wildcard nev/station/**)")
 
     def stop(self) -> None:
         for sub in self._subs:
             sub.undeclare()
-        for pub in self._pubs.values():
-            pub.undeclare()
 
-    def _on_heartbeat(self, sample):
-        self._loop.call_soon_threadsafe(self._recv_heartbeat)
+    def _call(self, fn, *args):
+        self._loop.call_soon_threadsafe(fn, *args)
 
-    def _recv_heartbeat(self):
-        self._state.station_last_recv = time.monotonic()
-        if not self._state.station_connected:
-            self._state.update_station_connected(True)
+    def _on_station(self, sample):
+        # nev/station/{vehicle_id}/{topic}
+        parts = str(sample.key_expr).split("/")
+        if len(parts) < 4:
+            return
+        vehicle_id = parts[2]
+        topic = parts[3]
+        raw = bytes(sample.payload)
 
-    def _on_teleop(self, sample):
+        if topic == "teleop":
+            self._handle_teleop(vehicle_id, raw)
+
+        elif topic == "estop":
+            self._handle_estop(vehicle_id, raw)
+
+        elif topic == "cmd_mode":
+            self._handle_cmd_mode(vehicle_id, raw)
+
+        elif topic == "controller_heartbeat":
+            self._handle_joystick(raw)
+
+        elif topic == "station_ping":
+            self._handle_station_ping(vehicle_id, raw)
+
+        elif topic == "bot_ping":
+            self._relay_bot_ping(vehicle_id, raw)
+
+    def _handle_teleop(self, vehicle_id: str, raw: bytes):
         try:
-            data = json.loads(bytes(sample.payload))
-            if self._state.station_connected:
-                lx    = float(data.get('linear_x',    0.0))
-                steer = float(data.get('steer_angle', 0.0))
-                if abs(steer) < 1e-6:
-                    az = 0.0
-                elif abs(lx) < 0.05:
-                    az = steer
-                elif self._wheelbase > 0:
-                    az = lx * math.tan(steer) / self._wheelbase
-                else:
-                    az = 0.0
-                self._proto.send_teleop(lx, az)
-                steer_deg = math.degrees(steer)
-                self._loop.call_soon_threadsafe(self._update_control, lx, az, steer_deg)
+            data = json.loads(raw)
+            if not self._state.station_connected:
+                return
+            lx = float(data.get("linear_x", 0.0))
+            steer = float(data.get("steer_angle", 0.0))
+            self._proto.send_teleop(vehicle_id, lx, steer)
+            steer_deg = math.degrees(steer)
+            self._call(self._update_control, lx, steer_deg)
         except Exception as e:
-            logger.warning(f'station teleop parse error: {e}')
+            logger.warning(f"station teleop parse error: {e}")
 
-    def _on_estop(self, sample):
+    def _handle_estop(self, vehicle_id: str, raw: bytes):
         try:
-            data   = json.loads(bytes(sample.payload))
-            active = bool(data.get('active', False))
-            self._proto.send_estop(active)
-            self._loop.call_soon_threadsafe(self._update_estop, active)
-            logger.info(f'Station e-stop → {active}')
+            data = json.loads(raw)
+            active = bool(data.get("active", False))
+            self._proto.send_estop(vehicle_id, active)
+            self._call(self._update_estop, active)
+            logger.info(f"[{vehicle_id}] Station e-stop -> {active}")
         except Exception as e:
-            logger.warning(f'station estop parse error: {e}')
+            logger.warning(f"station estop parse error: {e}")
 
-    def _on_cmd_mode(self, sample):
+    def _handle_cmd_mode(self, vehicle_id: str, raw: bytes):
         try:
-            data = json.loads(bytes(sample.payload))
-            mode = int(data.get('mode', -1))
-            self._proto.send_cmd_mode(mode)
-            self._loop.call_soon_threadsafe(self._update_mode, mode)
-            logger.info(f'Station cmd_mode → {mode}')
+            data = json.loads(raw)
+            mode = int(data.get("mode", -1))
+            self._proto.send_cmd_mode(vehicle_id, mode)
+            self._call(self._update_mode, mode)
+            logger.info(f"[{vehicle_id}] Station cmd_mode -> {mode}")
         except Exception as e:
-            logger.warning(f'station cmd_mode parse error: {e}')
+            logger.warning(f"station cmd_mode parse error: {e}")
 
-    def _on_joystick_connected(self, sample):
+    def _handle_joystick(self, raw: bytes):
         try:
-            data = json.loads(bytes(sample.payload))
-            val  = bool(data.get('connected', False))
-            self._loop.call_soon_threadsafe(
-                self._state.update_joystick_connected, val
-            )
+            data = json.loads(raw)
+            val = bool(data.get("connected", False))
+            self._state.station_last_recv = time.monotonic()
+            if not self._state.station_connected:
+                self._state.update_station_connected(True)
+            self._call(self._state.update_joystick_connected, val)
         except Exception as e:
-            logger.warning(f'station joystick_connected parse error: {e}')
+            logger.warning(f"station joystick_connected parse error: {e}")
 
-    def _on_station_ping(self, sample):
+    def _handle_station_ping(self, vehicle_id: str, raw: bytes):
         try:
-            data = json.loads(bytes(sample.payload))
-            ts = data.get('ts')
+            data = json.loads(raw)
+            ts = data.get("ts")
             if ts is None:
                 return
-            self._pubs['nev/gcs/station_pong'].put(json.dumps({'ts': ts}))
+            pub = self._proto._get_pub(vehicle_id, "station_pong")
+            pub.put(json.dumps({"ts": ts}))
         except Exception as e:
-            logger.warning(f'station ping parse error: {e}')
+            logger.warning(f"station ping parse error: {e}")
 
-    def _update_control(self, lx: float, az: float, steer_deg: float = 0.0):
-        self._state.control.linear_x        = lx
-        self._state.control.angular_z       = az
+    def _relay_bot_ping(self, vehicle_id: str, raw: bytes):
+        try:
+            pub = self._proto._get_pub(vehicle_id, "bot_ping")
+            pub.put(raw)
+        except Exception as e:
+            logger.warning(f"bot_ping relay error: {e}")
+
+    def _update_control(self, lx: float, steer_deg: float):
+        self._state.control.linear_x = lx
         self._state.control.steer_angle_deg = steer_deg
 
     def _update_estop(self, active: bool):
