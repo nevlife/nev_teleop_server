@@ -39,6 +39,8 @@ class StationBridge:
         topic = parts[3]
         raw = bytes(sample.payload)
 
+        self._call(self._state.get_vehicle, vehicle_id)
+
         if topic == "teleop":
             self._handle_teleop(vehicle_id, raw)
 
